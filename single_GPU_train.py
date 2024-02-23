@@ -158,7 +158,7 @@ def main(args):
     loader = DataLoader(
         dataset,
         # batch_size=int(args.global_batch_size // dist.get_world_size()),
-        batch_size=8,
+        batch_size=args.batch_size,
         shuffle=False,
         # sampler=sampler,
         num_workers=args.num_workers,
