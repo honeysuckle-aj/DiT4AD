@@ -22,6 +22,23 @@ import os
 
 from tqdm import tqdm
 
+def reconstruct(model, diffusion, loader, output_folder, vae, device, batch_size, final_step, image_size=256):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    model.eval()  # important! This disables randomized embedding dropout
+    pbar = tqdm(enumerate(loader), desc="Eval:")
+    t = torch.LongTensor([final_step-1 for _ in range(batch_size)]).to(device)
+    with torch.no_grad():
+        for i,(x,y) in pbar:
+            x = x.to(device)
+            # save_image(x, os.path.join(output_folder,f"origin_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
+            x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
+            x_noised = diffusion.q_sample(x_latent, t)
+            pred_latent = diffusion.ddim_sample_loop(model, shape=pair(image_size), noise=x_noised)
+            pred = vae.decode(pred_latent / 0.18215).sample
+            
+            # image_compare = torch.concat((x,pred),dim=2)
+            save_image(pred, os.path.join(output_folder,f"pred_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
 
 def main(args):
     # Setup PyTorch:

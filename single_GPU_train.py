@@ -32,8 +32,8 @@ import os
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-from ad_dataset import MaskedDataset, load_textures, pair
-
+from ad_dataset import MaskedDataset, TestDataset,load_textures, pair
+from reconstruct import reconstruct
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -148,6 +148,7 @@ def main(args):
                
     # dataset = ImageFolder(args.data_path, transform=transform)
     dataset = MaskedDataset(args.data_path, textures=textures)
+    test_set = TestDataset(args.test_set)
     # sampler = DistributedSampler(
     #     dataset,
     #     num_replicas=dist.get_world_size(),
@@ -165,7 +166,9 @@ def main(args):
         # pin_memory=True,
         drop_last=True
     )
-    logger.info(f"Dataset contains {len(dataset):,} images ({args.data_path})")
+    test_loader = DataLoader(test_set, batch_size=8, drop_last=True)
+    logger.info(f"Training Dataset contains {len(dataset)} images")
+    logger.info(f"Eval Dataset contains {len(test_set)} images")
 
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
@@ -244,10 +247,11 @@ def main(args):
                 # dist.barrier()
         # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
         logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
-    model.eval()  # important! This disables randomized embedding dropout
+    
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
-
-    logger.info("Done!")
+    logger.info("Training Done!")
+    torch.cuda.empty_cache()
+    reconstruct(model, diffusion, test_loader, args.output_folder, vae, device, batch_size=8, final_step=len(diffusion.use_timesteps))
     # cleanup()
 
 
@@ -255,12 +259,13 @@ if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str, default="dataset/capsule/train")
+    parser.add_argument("--test-set", type=str, default="dataset/capsule/test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1500)
+    parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
@@ -268,5 +273,6 @@ if __name__ == "__main__":
     parser.add_argument("--log-every", type=int, default=100)
     parser.add_argument("--ckpt-every", type=int, default=5000)
     parser.add_argument("--batch-size",type=int, default=8)
+    parser.add_argument("--output-folder",type=str, default="samples")
     args = parser.parse_args()
     main(args)
