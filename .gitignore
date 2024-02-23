@@ -1,0 +1,7 @@
+*__pycache__
+dataset/capsule
+dataset/textures/*
+results/*
+stabilityai/sd-vae-ft-ema/*
+
+
