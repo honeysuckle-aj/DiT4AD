@@ -90,7 +90,7 @@ def main(args):
     # samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     # samples = vae.decode(samples / 0.18215).sample
     
-    reconstruct(model, diffusion, loader, args.output_folder, vae, device, batch_size=8)
+    reconstruct(model, loader, args.output_folder, vae, device, batch_size=8)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
