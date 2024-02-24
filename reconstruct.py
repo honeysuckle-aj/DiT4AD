@@ -22,12 +22,13 @@ import os
 
 from tqdm import tqdm
 
-def reconstruct(model, diffusion, loader, output_folder, vae, device, batch_size, final_step, image_size=256):
+def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
+    diffusion = create_diffusion(timestep_respacing="ddim100")
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([final_step-1 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([len(diffusion.use_timesteps)-1 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i,(x,y) in pbar:
             x = x.to(device)
@@ -54,7 +55,7 @@ def main(args):
         assert args.num_classes == 1000
     # Load test dataset
     test_dataset = TestDataset(args.dataset)
-    loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
+    loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=True)
     # Load model:
     latent_size = args.image_size // 8
     model = DiT_models[args.model](
@@ -66,7 +67,6 @@ def main(args):
     state_dict = find_model(ckpt_path)
     model.load_state_dict(state_dict)
     model.eval()  # important!
-    diffusion = create_diffusion(str(args.num_sampling_steps))
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
 
     # # Labels to condition the model with (feel free to change):
@@ -89,18 +89,8 @@ def main(args):
     # )
     # samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     # samples = vae.decode(samples / 0.18215).sample
-    pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([args.num_sampling_steps-1 for _ in range(args.batch_size)]).to(device)
-    for i,(x,y) in pbar:
-        x = x.to(device)
-        save_image(x, os.path.join(args.output_folder,f"origin_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
-        x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
-        x_noised = diffusion.q_sample(x_latent, t)
-        pred_latent = diffusion.ddim_sample_loop(model, shape=pair(args.image_size), noise=x_noised)
-        pred = vae.decode(pred_latent / 0.18215).sample
-        
-        # image_compare = torch.concat((x,pred),dim=2)
-        save_image(pred, os.path.join(args.output_folder,f"pred_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
+    
+    reconstruct(model, diffusion, loader, args.output_folder, vae, device, batch_size=8)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
@@ -116,8 +106,8 @@ if __name__ == "__main__":
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--ckpt", type=str, default=r"results\000-DiT-L-4\checkpoints\0010000.pt",
+    parser.add_argument("--ckpt", type=str, default="results/001-DiT-L-4/checkpoints/0010000.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
-    parser.add_argument("--output-folder", type=str, default=r"results\000-DiT-L-4\samples")
+    parser.add_argument("--output-folder", type=str, default=r"results\001-DiT-L-4\samples")
     args = parser.parse_args()
     main(args)

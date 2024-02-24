@@ -129,7 +129,7 @@ def main(args):
     model = model.to(device)
     requires_grad(ema, False)
     # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
-    diffusion = create_diffusion(timestep_respacing="ddim100")  # default: 1000 steps, linear noise schedule
+    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -251,7 +251,7 @@ def main(args):
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     logger.info("Training Done!")
     torch.cuda.empty_cache()
-    reconstruct(model, diffusion, test_loader, args.output_folder, vae, device, batch_size=8, final_step=len(diffusion.use_timesteps))
+    reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
     # cleanup()
 
 
