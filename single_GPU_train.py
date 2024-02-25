@@ -8,23 +8,13 @@
 A minimal training script for DiT using PyTorch DDP.
 """
 import torch
-# the first flag below was False when we tested this script but True makes A100 training a lot faster:
-torch.backends.cuda.matmul.allow_tf32 = True
-torch.backends.cudnn.allow_tf32 = True
-# import torch.distributed as dist
-# from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
-from torchvision.datasets import ImageFolder
-from torchvision import transforms
 import numpy as np
 from collections import OrderedDict
-from PIL import Image
 from copy import deepcopy
 from glob import glob
 from time import time
-from tqdm import tqdm 
-from einops import repeat
+from tqdm import tqdm
 import argparse
 import logging
 import os
@@ -32,8 +22,15 @@ import os
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
-from ad_dataset import MaskedDataset, TestDataset,load_textures, pair
+from ad_dataset import MaskedDataset, TestDataset, load_textures, pair
 from reconstruct import reconstruct
+
+# the first flag below was False when we tested this script but True makes A100 training a lot faster:
+
+
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+
 
 #################################################################################
 #                             Training Helper Functions                         #
@@ -82,9 +79,6 @@ def create_logger(logging_dir):
     return logger
 
 
-
-
-
 #################################################################################
 #                                  Training Loop                                #
 #################################################################################
@@ -116,7 +110,6 @@ def main(args):
     logger = create_logger(experiment_dir)
     # logger.info(f"Experiment directory created at {experiment_dir}")
 
-
     # Create model:
     assert args.image_size % 8 == 0, "Image size must be divisible by 8 (for the VAE encoder)."
     latent_size = args.image_size // 8
@@ -145,7 +138,7 @@ def main(args):
     # ])
 
     textures = load_textures(args.texture_path, image_size=pair(args.image_size))
-               
+
     # dataset = ImageFolder(args.data_path, transform=transform)
     dataset = MaskedDataset(args.data_path, textures=textures)
     test_set = TestDataset(args.test_set)
@@ -181,7 +174,7 @@ def main(args):
     running_loss = 0
     start_time = time()
     # sum_loss = 0
-    
+
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch in range(args.epochs):
         sum_loss = 0
@@ -226,7 +219,8 @@ def main(args):
                 # dist.all_reduce(avg_loss, op=dist.ReduceOp.SUM)
                 # avg_loss = avg_loss.item() / dist.get_world_size()
                 avg_loss = avg_loss.item()
-                logger.info(f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+                logger.info(
+                    f"(step={train_steps:07d}) Train Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
                 # Reset monitoring variables:
                 running_loss = 0
                 log_steps = 0
@@ -247,7 +241,7 @@ def main(args):
                 # dist.barrier()
         # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
         logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
-    
+
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     logger.info("Training Done!")
     torch.cuda.empty_cache()
@@ -258,21 +252,21 @@ def main(args):
 if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, default="dataset/capsule/train")
-    parser.add_argument("--test-set", type=str, default="dataset/capsule/test")
+    parser.add_argument("--data-path", type=str, default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\train\good")
+    parser.add_argument("--test-set", type=str, default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=1)
+    parser.add_argument("--epochs", type=int, default=2000)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--ckpt-every", type=int, default=5000)
-    parser.add_argument("--batch-size",type=int, default=8)
-    parser.add_argument("--output-folder",type=str, default="samples")
+    parser.add_argument("--log-every", type=int, default=1000)
+    parser.add_argument("--ckpt-every", type=int, default=1000)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--output-folder", type=str, default="samples")
     args = parser.parse_args()
     main(args)

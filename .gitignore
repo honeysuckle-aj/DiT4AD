@@ -4,5 +4,7 @@ dataset/textures/*
 results/*
 stabilityai/sd-vae-ft-ema/*
 samples
+*.xml
+*.iml
 
 
