@@ -719,10 +719,12 @@ class GaussianDiffusion:
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
         :param x_start: the [N x C x ...] tensor of inputs.
+        :param x_mask_start: the masked x_start(can be the same as x_start)
         :param t: a batch of timestep indices.
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
         :param noise: if specified, the specific Gaussian noise to try to remove.
+        :param sum_steps: total sampling steps
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
         """
@@ -730,10 +732,8 @@ class GaussianDiffusion:
             model_kwargs = {}
         if noise is None:
             noise = th.randn_like(x_start)
-        if t[0] > sum_steps/2:
-            x_t = self.q_sample(x_mask_start, t, noise=noise)
-        else:
-            x_t = self.q_sample(x_start, t, noise=noise)
+
+        x_t = self.q_sample(x_mask_start, t, noise=noise)
         
         terms = {}
 
