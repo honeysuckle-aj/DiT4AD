@@ -1,6 +1,5 @@
 *__pycache__
-dataset/capsule
-dataset/textures/*
+dataset/*
 results/*
 stabilityai/sd-vae-ft-ema/*
 samples

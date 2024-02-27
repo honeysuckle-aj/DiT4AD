@@ -26,7 +26,7 @@ torch.backends.cudnn.allow_tf32 = True
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="")
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
     t = torch.LongTensor([len(diffusion.use_timesteps)-1 for _ in range(batch_size)]).to(device)
@@ -41,6 +41,18 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
             # print(torch.sum(x_noised-x_latent))
             image_compare = torch.concat((x,pred),dim=2)
             save_image(pred, os.path.join(output_folder,f"pred_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
+
+def random_sample(model, output_folder, vae, device, batch_size, image_size=256):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
+    model.eval()
+    latent_size = image_size // 8
+    z = torch.randn(batch_size, 4, latent_size, latent_size, device=device)
+    pred_latent = diffusion.p_sample_loop(model, z.shape, noise=z)
+    pred = vae.decode(pred_latent / 0.18215).sample
+    save_image(pred, os.path.join(output_folder,"random_sample.png"), nrow=4, normalize=True, value_range=(-1,1))
+
 
 def main(args):
     # Setup PyTorch:
@@ -92,6 +104,7 @@ def main(args):
     # samples = vae.decode(samples / 0.18215).sample
     
     reconstruct(model, loader, args.output_folder, vae, device, batch_size=8)
+    random_sample(model, args.output_folder, vae, device, batch_size=8)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
@@ -105,9 +118,9 @@ if __name__ == "__main__":
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--cfg-scale", type=float, default=4.0)
-    parser.add_argument("--num-sampling-steps", type=int, default=250)
+    parser.add_argument("--num-sampling-steps", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--ckpt", type=str, default="results/000-DiT-L-4/checkpoints/0003000.pt",
+    parser.add_argument("--ckpt", type=str, default="results/002-DiT-L-4/checkpoints/0020000.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     parser.add_argument("--output-folder", type=str, default=r"samples")
     args = parser.parse_args()

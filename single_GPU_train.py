@@ -122,12 +122,12 @@ def main(args):
     model = model.to(device)
     requires_grad(ema, False)
     # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
-    diffusion = create_diffusion(timestep_respacing="")  # default: 1000 steps, linear noise schedule. in training use ddpm config
+    diffusion = create_diffusion(timestep_respacing="",diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0)
+    opt = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=1e-4)
 
     # Setup data:
     # transform = transforms.Compose([
@@ -240,7 +240,7 @@ def main(args):
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
                 # dist.barrier()
         # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
-        logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
+        # logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
 
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     logger.info("Training Done!")
@@ -264,8 +264,8 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=4)
-    parser.add_argument("--log-every", type=int, default=1000)
-    parser.add_argument("--ckpt-every", type=int, default=1000)
+    parser.add_argument("--log-every", type=int, default=500)
+    parser.add_argument("--ckpt-every", type=int, default=10000)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--output-folder", type=str, default="samples")
     args = parser.parse_args()
