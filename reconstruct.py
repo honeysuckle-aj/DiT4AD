@@ -23,15 +23,16 @@ from tqdm import tqdm
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="")
+    diffusion = create_diffusion(timestep_respacing="ddim100")
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([len(diffusion.use_timesteps)-1 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
-        for i,(x,y) in pbar:
+        for i, (x, y) in pbar:
             x = x.to(device)
             # save_image(x, os.path.join(output_folder,f"origin_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
             x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
@@ -39,8 +40,10 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
             pred_latent = diffusion.p_sample_loop(model, x_noised.shape, noise=x_noised)
             pred = vae.decode(pred_latent / 0.18215).sample
             # print(torch.sum(x_noised-x_latent))
-            image_compare = torch.concat((x,pred),dim=2)
-            save_image(pred, os.path.join(output_folder,f"pred_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
+            image_compare = torch.concat((x, pred), dim=2)
+            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=4, normalize=True,
+                       value_range=(-1, 1))
+
 
 def main(args):
     # Setup PyTorch:
@@ -90,7 +93,7 @@ def main(args):
     # )
     # samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     # samples = vae.decode(samples / 0.18215).sample
-    
+
     reconstruct(model, loader, args.output_folder, vae, device, batch_size=8)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
@@ -98,7 +101,8 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", type=str, default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\test")
+    parser.add_argument("--dataset", type=str,
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\test")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")

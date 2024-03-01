@@ -53,6 +53,10 @@ def center_crop_arr(pil_image, image_size):
     crop_x = (arr.shape[1] - image_size) // 2
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
+def random_rotate(image, p=0.5):
+    if np.random.rand() <= p:
+        image = image.rotate(90)
+    return image
 
 def is_image_file(filename: str) -> bool:
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
@@ -80,7 +84,9 @@ class MaskedDataset(Dataset):
         self.masked_images = []
         self.textures = textures
         self.masks = []
-        self.transform = transforms.Compose([transforms.ToTensor(),
+        self.transform = transforms.Compose([transforms.RandomHorizontalFlip(),
+                                             transforms.Lambda(lambda image: random_rotate(image, p=0.5)),
+                                             transforms.ToTensor(),
                                              transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
                                                                   inplace=True)])
 

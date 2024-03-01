@@ -228,12 +228,12 @@ def main(args):
         # avg_loss = avg_loss.item() / dist.get_world_size()
         avg_loss = avg_loss.item()
         logger.info(
-            f"(step={epoch_batch:05d}) Average Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+            f"(epoch batch={epoch_batch:05d}) Average Loss: {avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
         # Reset monitoring variables:
         start_time = time()
 
         # Save DiT checkpoint:
-        if epoch_batch * args.log_every_epoch % args.ckpt_every == args.ckpt_every - 1:
+        if epoch_batch % args.ckpt_every_epoch == args.ckpt_every_epoch - 1:
             # if rank == 0:
             checkpoint = {
                 "model": model.state_dict(),
@@ -247,6 +247,9 @@ def main(args):
             # dist.barrier()
             # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
             # logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
+            torch.cuda.empty_cache()
+            reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
+            model.train()
 
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     logger.info("Training Done!")
@@ -259,22 +262,22 @@ if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\train\good")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\train\good")
     parser.add_argument("--test-set", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\test")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=4000)
+    parser.add_argument("--epochs", type=int, default=6000)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
+    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="mse")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=1000)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--output-folder", type=str, default="samples_mask")
+    parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
     args = parser.parse_args()
     main(args)

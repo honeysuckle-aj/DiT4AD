@@ -1,7 +1,7 @@
 *__pycache__
 dataset
 results/*
-stabilityai/sd-vae-ft-ema/*
+stabilityai
 samples
 samples_mask
 *.xml
