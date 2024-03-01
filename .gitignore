@@ -6,5 +6,7 @@ samples
 samples_mask
 *.xml
 *.iml
+ckpts
+
 
 
