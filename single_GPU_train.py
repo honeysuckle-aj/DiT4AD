@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 
+from download import find_model
 from models import DiT_models
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
@@ -91,16 +92,9 @@ def main(args):
 
     assert torch.cuda.is_available(), "Training currently requires at least one GPU."
     device = "cuda:0" if torch.cuda.is_available() else "CPU"
-    # Setup DDP:
-    # dist.init_process_group("nccl")
-    # assert args.global_batch_size % dist.get_world_size() == 0, f"Batch size must be divisible by world size."
-    # rank = dist.get_rank()
-    # device = rank % torch.cuda.device_count()
-    # seed = args.global_seed * dist.get_world_size() + rank
+
     torch.manual_seed(1)
     torch.cuda.set_device(device)
-    # print(f"Starting rank={rank}, seed={seed}, world_size={dist.get_world_size()}.")
-
     # Setup an experiment folder:
 
     os.makedirs(args.results_dir, exist_ok=True)  # Make results folder (holds all experiment subfolders)
@@ -119,18 +113,23 @@ def main(args):
         input_size=latent_size,
         # num_classes=args.num_classes
     )
+    # use pre-trained model
+    if args.pre_trained != "":
+        state_dict = find_model(args.pre_trained)
+        model.load_state_dict(state_dict)
+
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(model).to(device)  # Create an EMA of the model for use after training
     model = model.to(device)
     requires_grad(ema, False)
     # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
     diffusion = create_diffusion(timestep_respacing="",
-                                 diffusion_steps=1000)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+                                 diffusion_steps=200)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=5e-5, weight_decay=0.98)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.98)
 
     # Setup data:
     # transform = transforms.Compose([
@@ -241,7 +240,7 @@ def main(args):
                 "opt": opt.state_dict(),
                 "args": args
             }
-            checkpoint_path = f"{checkpoint_dir}/{epoch_batch * args.log_every_epoch:07d}.pt"
+            checkpoint_path = "last.pt"
             torch.save(checkpoint, checkpoint_path)
             logger.info(f"Saved checkpoint to {checkpoint_path}")
             # dist.barrier()
@@ -273,11 +272,12 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=6000)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
-    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="mse")  # Choice doesn't affect training
+    parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
     parser.add_argument("--ckpt-every-epoch", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
+    parser.add_argument("--pre-trained", type=str, default="")
     args = parser.parse_args()
     main(args)

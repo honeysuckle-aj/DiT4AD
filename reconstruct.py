@@ -27,7 +27,7 @@ torch.backends.cudnn.allow_tf32 = True
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="ddim100")
+    diffusion = create_diffusion(timestep_respacing="ddim20")
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
     t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(batch_size)]).to(device)

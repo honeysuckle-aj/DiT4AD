@@ -1,5 +1,6 @@
 import os
 import torch
+import random
 import numpy as np
 import time
 
@@ -16,6 +17,11 @@ IMG_EXTENSIONS = [
     '.tif', '.TIF', '.tiff', '.TIFF'
 ]
 
+transform = transforms.Compose([transforms.Resize([256, 256]),
+                                transforms.ToTensor(),
+                                transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
+                                                     inplace=True)])
+
 
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
@@ -31,6 +37,11 @@ def make_mask(texture: np.ndarray, size: tuple, ratio=0.3):
     return texture_mask, mask
 
 
+def add_mask(image, mask, texture_mask):
+    image = np.array(image.resize(mask.shape))
+    return Image.fromarray(np.uint8(image * (1 - repeat(mask, "h w -> h w c", c=3)) + texture_mask))
+
+
 def center_crop_arr(pil_image, image_size):
     """
     Center cropping implementation from ADM.
@@ -38,6 +49,7 @@ def center_crop_arr(pil_image, image_size):
     """
     if isinstance(image_size, tuple):
         image_size = image_size[0]
+
     while min(*pil_image.size) >= 2 * image_size:
         pil_image = pil_image.resize(
             tuple(x // 2 for x in pil_image.size), resample=Image.BOX
@@ -53,10 +65,13 @@ def center_crop_arr(pil_image, image_size):
     crop_x = (arr.shape[1] - image_size) // 2
     return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
-def random_rotate(image, p=0.5):
-    if np.random.rand() <= p:
-        image = image.rotate(90)
-    return image
+
+def random_rotate(image):
+    if random.random() <= 0.25:
+        return image
+    deg = random.choice([Image.ROTATE_90, Image.ROTATE_180, Image.ROTATE_270])
+    return image.transpose(deg)
+
 
 def is_image_file(filename: str) -> bool:
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
@@ -66,8 +81,8 @@ def load_textures(texture_path, image_size=(256, 256)):
     textures = []
     for filename in os.listdir(texture_path):
         if is_image_file(filename):
-            texture = np.array(Image.open(os.path.join(texture_path, filename)).resize(image_size))
-            textures.append(texture)
+            texture_image = Image.open(os.path.join(texture_path, filename)).resize(image_size)
+            textures.append(np.array(texture_image))
     assert len(textures) > 0
     return textures
 
@@ -84,23 +99,16 @@ class MaskedDataset(Dataset):
         self.masked_images = []
         self.textures = textures
         self.masks = []
-        self.transform = transforms.Compose([transforms.RandomHorizontalFlip(),
-                                             transforms.Lambda(lambda image: random_rotate(image, p=0.5)),
-                                             transforms.ToTensor(),
-                                             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
-                                                                  inplace=True)])
+        self.transform = transform
 
         for i in tqdm(range(len(self.image_path)), desc="loading images"):
-            image_i = np.array(Image.open(self.image_path[i]).resize(image_size))  # height * width * channel
+            image_i = random_rotate(Image.open(self.image_path[i]))  # height * width * channel + rotation
             # image_i = rearrange(image_i, "h w c -> c h w") 
             self.images.append(self.transform(image_i))
-            if i % 10 < masked_ratio * 10:
-                texture_mask, mask = make_mask(textures[i % len(textures)], size=image_size)
-                self.masked_images.append(self.transform(
-                    (image_i * (1 - repeat(mask, "h w -> h w c", c=3)) + texture_mask).astype(np.float32)))
-            else:
-                mask = np.zeros(image_size)
-                self.masked_images.append(self.transform(image_i))
+
+            texture_mask, mask = make_mask(textures[i % len(textures)], size=image_size)
+            self.masked_images.append(
+                self.transform(add_mask(image_i, mask, texture_mask)))
             self.masks.append(mask)
         self.images = torch.tensor(np.array(self.images), dtype=torch.float)
         self.masked_images = torch.tensor(np.array(self.masked_images), dtype=torch.float)
@@ -119,12 +127,7 @@ class TestDataset(Dataset):
         self.bad_image_path = load_image_paths(os.path.join(test_path, "bad"))
         self.x = []
         self.y = []
-        self.transform = transforms.Compose([
-            transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, image_size)),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-        ])
+        self.transform = transform
         for i in tqdm(range(len(self.good_image_path)), desc="loading good images"):
             image_i = self.transform(Image.open(self.good_image_path[i]))
             # image_i = np.array(Image.open(self.good_image_path[i]).resize(image_size)) # height * width * channel
