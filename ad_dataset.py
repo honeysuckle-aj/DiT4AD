@@ -129,13 +129,13 @@ class TestDataset(Dataset):
         self.y = []
         self.transform = transform
         for i in tqdm(range(len(self.good_image_path)), desc="loading good images"):
-            image_i = self.transform(Image.open(self.good_image_path[i]))
+            image_i = self.transform(random_rotate(Image.open(self.good_image_path[i])))
             # image_i = np.array(Image.open(self.good_image_path[i]).resize(image_size)) # height * width * channel
             # image_i = rearrange(image_i, "h w c -> c h w") 
             self.x.append(image_i)
             self.y.append(0)
         for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
-            image_i = self.transform(Image.open(self.bad_image_path[i]))
+            image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i])))
             # image_i = np.array(Image.open(self.bad_image_path[i]).resize(image_size)) # height * width * channel
             # image_i = rearrange(image_i, "h w c -> c h w") 
             self.x.append(image_i)
