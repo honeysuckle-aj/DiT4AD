@@ -27,21 +27,23 @@ torch.backends.cudnn.allow_tf32 = True
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="ddim20")
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([(len(diffusion.use_timesteps) - 1)//2 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i, (x, y) in pbar:
             x = x.to(device)
             # save_image(x, os.path.join(output_folder,f"origin_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
             x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
             x_noised = diffusion.q_sample(x_latent, t)
+            # z = torch.randn_like(x_noised, device=device)
             pred_latent = diffusion.p_sample_loop(model, x_noised.shape, noise=x_noised)
             pred = vae.decode(pred_latent / 0.18215).sample
+            # z = vae.decode(z / 0.18215).sample
             # print(torch.sum(x_noised-x_latent))
             image_compare = torch.concat((x, pred), dim=2)
-            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=4, normalize=True,
+            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=2, normalize=True,
                        value_range=(-1, 1))
 
 
@@ -94,7 +96,7 @@ def main(args):
     # samples, _ = samples.chunk(2, dim=0)  # Remove null class samples
     # samples = vae.decode(samples / 0.18215).sample
 
-    reconstruct(model, loader, args.output_folder, vae, device, batch_size=8)
+    reconstruct(model, loader, args.output_folder, vae, device, batch_size=args.batch_size)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
@@ -102,7 +104,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\metal_nut\test")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")
@@ -111,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--ckpt", type=str, default="results/000-DiT-L-4/checkpoints/0003000.pt",
+    parser.add_argument("--ckpt", type=str, default="ckpts/last.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     parser.add_argument("--output-folder", type=str, default=r"samples")
     args = parser.parse_args()
