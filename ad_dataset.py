@@ -22,6 +22,11 @@ transform = transforms.Compose([transforms.Resize([256, 256]),
                                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
                                                      inplace=True)])
 
+guidance_transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize(mean=0.5,std=0.5,inplace=True)
+])
+
 
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
@@ -91,31 +96,38 @@ def load_image_paths(image_path):
     images = [os.path.join(image_path, img) for img in os.listdir(image_path) if is_image_file(img)]
     return images
 
+def get_guidance_channel(image, image_size=256):
+    gray_img = image.convert('L').resize((image_size//8, image_size//8))
+    gray_img = np.array(gray_img)
+    noise = np.random.normal(0, 256, gray_img.shape)
+    return Image.fromarray(gray_img + noise)
+
 
 class MaskedDataset(Dataset):
     def __init__(self, image_path, textures, image_size=(256, 256), masked_ratio=0.6) -> None:
         self.image_path = load_image_paths(image_path)
         self.images = []
         self.masked_images = []
+        self.guidance = []
         self.textures = textures
         self.masks = []
-        self.transform = transform
 
         for i in tqdm(range(len(self.image_path)), desc="loading images"):
             image_i = random_rotate(Image.open(self.image_path[i]))  # height * width * channel + rotation
             # image_i = rearrange(image_i, "h w c -> c h w") 
-            self.images.append(self.transform(image_i))
-
+            self.images.append(transform(image_i))
+            self.guidance.append(guidance_transform(get_guidance_channel(image_i)))
             texture_mask, mask = make_mask(textures[i % len(textures)], size=image_size)
             self.masked_images.append(
-                self.transform(add_mask(image_i, mask, texture_mask)))
+                transform(add_mask(image_i, mask, texture_mask)))
             self.masks.append(mask)
         self.images = torch.tensor(np.array(self.images), dtype=torch.float)
         self.masked_images = torch.tensor(np.array(self.masked_images), dtype=torch.float)
         self.masks = torch.tensor(np.array(self.masks), dtype=torch.float)
+        self.guidance = torch.tensor(np.array(self.guidance),dtype=torch.float)
 
     def __getitem__(self, index):
-        return self.images[index], self.masked_images[index], self.masks[index]
+        return self.images[index], self.masked_images[index], self.masks[index], self.guidance[index]
 
     def __len__(self):
         return len(self.images)
@@ -126,25 +138,28 @@ class TestDataset(Dataset):
         self.good_image_path = load_image_paths(os.path.join(test_path, "good"))
         self.bad_image_path = load_image_paths(os.path.join(test_path, "bad"))
         self.x = []
+        self.guidance = []
         self.y = []
-        self.transform = transform
         for i in tqdm(range(len(self.good_image_path)), desc="loading good images"):
-            image_i = self.transform(random_rotate(Image.open(self.good_image_path[i])))
+            image_i = random_rotate(Image.open(self.good_image_path[i]))
             # image_i = np.array(Image.open(self.good_image_path[i]).resize(image_size)) # height * width * channel
             # image_i = rearrange(image_i, "h w c -> c h w") 
-            self.x.append(image_i)
+            self.x.append(transform(image_i))
+            self.guidance.append(guidance_transform(get_guidance_channel(image_i)))
             self.y.append(0)
         for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
-            image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i])))
+            image_i = random_rotate(Image.open(self.bad_image_path[i]))
             # image_i = np.array(Image.open(self.bad_image_path[i]).resize(image_size)) # height * width * channel
             # image_i = rearrange(image_i, "h w c -> c h w") 
-            self.x.append(image_i)
+            self.x.append(transform(image_i))
+            self.guidance.append(guidance_transform(get_guidance_channel(image_i)))
             self.y.append(1)
         self.x = torch.tensor(np.array(self.x), dtype=torch.float)
+        self.guidance = torch.tensor(np.array(self.guidance), dtype=torch.float)
         self.y = torch.tensor(np.array(self.y), dtype=torch.int64)
 
     def __getitem__(self, index):
-        return self.x[index], self.y[index]
+        return self.x[index], self.guidance[index], self.y[index]
 
     def __len__(self):
         return len(self.x)

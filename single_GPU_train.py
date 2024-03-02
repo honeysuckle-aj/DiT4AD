@@ -169,7 +169,7 @@ def main(args):
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-
+    reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
     # Variables for monitoring/logging purposes:
     start_time = time()
     # sum_loss = 0
@@ -184,9 +184,10 @@ def main(args):
             # sampler.set_epoch(epoch)
             t_mask = 100  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
             mask_epoch = 10  # masked images will be trained once every 10 epochs
-            for i, (img, mask_img, mask) in enumerate(loader):
+            for i, (img, mask_img, mask, guidance) in enumerate(loader):
                 img = img.to(device)
                 mask_img = mask_img.to(device)
+                guidance = guidance.to(device)
                 mask = mask.to(device)
                 # x = x.to(device)
                 # y = y.to(device)
@@ -199,11 +200,11 @@ def main(args):
                     # train masked images
                     t = torch.randint(diffusion.num_timesteps - t_mask, diffusion.num_timesteps, (img.shape[0],),
                                       device=device)
-                    loss_dict = diffusion.training_losses(model, img, mask_img, t, sum_steps=diffusion.num_timesteps)
+                    loss_dict = diffusion.training_losses(model, img, mask_img, t, guidance=guidance, sum_steps=diffusion.num_timesteps)
                 else:
                     # train normal images
                     t = torch.randint(0, diffusion.num_timesteps, (img.shape[0],), device=device)
-                    loss_dict = diffusion.training_losses(model, img, img, t, sum_steps=diffusion.num_timesteps)
+                    loss_dict = diffusion.training_losses(model, img, img, t, guidance=guidance, sum_steps=diffusion.num_timesteps)
                 # t = repeat(torch.randint(0, diffusion.num_timesteps, (1,), device=device),"l -> b", b=img.shape[0]) # img.shape[0] -> batch size
                 # TODO
                 # model_kwargs = dict(y=y)
@@ -240,7 +241,7 @@ def main(args):
                 "opt": opt.state_dict(),
                 "args": args
             }
-            checkpoint_path = "last.pt"
+            checkpoint_path = f"{experiment_dir}/checkpoints/last.pt"
             torch.save(checkpoint, checkpoint_path)
             logger.info(f"Saved checkpoint to {checkpoint_path}")
             # dist.barrier()
@@ -266,7 +267,7 @@ if __name__ == "__main__":
                         default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="Guided")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=6000)
