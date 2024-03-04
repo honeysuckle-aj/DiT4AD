@@ -168,10 +168,7 @@ class DiT(nn.Module):
         super().__init__()
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
-        if guided:
-            self.out_channels = (in_channels - 1) * 2 if learn_sigma else in_channels - 1
-        else:
-            self.out_channels = in_channels * 2 if learn_sigma else in_channels
+        self.out_channels = in_channels * 2 if learn_sigma else in_channels
         self.patch_size = patch_size
         self.num_heads = num_heads
 
@@ -385,14 +382,16 @@ def DiT_S_8(**kwargs):
     return DiT(depth=12, hidden_size=384, patch_size=8, num_heads=6, **kwargs)
 
 
-def DiT_Guided(**kwargs):  # DiT L/4 -> in channel = 5
+def DiT_Guided_1(**kwargs):  # DiT L/4 -> in channel = 5
     return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16,  **kwargs)
 
+def DiT_Guided_2(**kwargs):  # DiT L/4 -> in channel = 5
+    return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16,  **kwargs)
 
 DiT_models = {
     'DiT-XL/2': DiT_XL_2, 'DiT-XL/4': DiT_XL_4, 'DiT-XL/8': DiT_XL_8,
     'DiT-L/2': DiT_L_2, 'DiT-L/4': DiT_L_4, 'DiT-L/8': DiT_L_8,
     'DiT-B/2': DiT_B_2, 'DiT-B/4': DiT_B_4, 'DiT-B/8': DiT_B_8,
     'DiT-S/2': DiT_S_2, 'DiT-S/4': DiT_S_4, 'DiT-S/8': DiT_S_8,
-    'Guided': DiT_Guided,
+    'Guided-1': DiT_Guided_1, 'Guided-2': DiT_Guided_2,
 }

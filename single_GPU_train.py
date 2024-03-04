@@ -169,7 +169,7 @@ def main(args):
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-    reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
+    # reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
     # Variables for monitoring/logging purposes:
     start_time = time()
     # sum_loss = 0
@@ -196,15 +196,17 @@ def main(args):
                     # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
                     img = vae.encode(img).latent_dist.sample().mul_(0.18215)
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
+                img = torch.cat((img, guidance),dim=1)
+                mask_img = torch.cat((mask_img, guidance),dim=1)
                 if i % mask_epoch == mask_epoch - 1:
                     # train masked images
                     t = torch.randint(diffusion.num_timesteps - t_mask, diffusion.num_timesteps, (img.shape[0],),
                                       device=device)
-                    loss_dict = diffusion.training_losses(model, img, mask_img, t, guidance=guidance, sum_steps=diffusion.num_timesteps)
+                    loss_dict = diffusion.training_losses(model, img, mask_img, t, sum_steps=diffusion.num_timesteps)
                 else:
                     # train normal images
                     t = torch.randint(0, diffusion.num_timesteps, (img.shape[0],), device=device)
-                    loss_dict = diffusion.training_losses(model, img, img, t, guidance=guidance, sum_steps=diffusion.num_timesteps)
+                    loss_dict = diffusion.training_losses(model, img, img, t, sum_steps=diffusion.num_timesteps)
                 # t = repeat(torch.randint(0, diffusion.num_timesteps, (1,), device=device),"l -> b", b=img.shape[0]) # img.shape[0] -> batch size
                 # TODO
                 # model_kwargs = dict(y=y)
@@ -247,7 +249,7 @@ def main(args):
             # dist.barrier()
             # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
             # logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
             model.train()
 
@@ -267,7 +269,7 @@ if __name__ == "__main__":
                         default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
-    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="Guided")
+    parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="Guided-2")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
     parser.add_argument("--epochs", type=int, default=6000)
@@ -276,7 +278,7 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=10)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
     parser.add_argument("--pre-trained", type=str, default="")

@@ -30,17 +30,18 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([(len(diffusion.use_timesteps) - 1)//2 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([(len(diffusion.use_timesteps) - 1) // 2 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i, (x, guidance, y) in pbar:
             x = x.to(device)
             guidance = guidance.to(device)
             # save_image(x, os.path.join(output_folder,f"origin_batch{i}.png"), nrow=4, normalize=True, value_range=(-1,1))
             x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
+            x_latent = torch.cat((x_latent, guidance), dim=1)
             x_noised = diffusion.q_sample(x_latent, t)
             # z = torch.randn_like(x_noised, device=device)
-            pred_latent = diffusion.p_sample_loop(model, x_noised.shape, noise=x_noised, guidance=guidance)
-            pred = vae.decode(pred_latent / 0.18215).sample
+            pred_latent = diffusion.p_sample_loop(model, x_noised.shape, noise=x_noised)
+            pred = vae.decode(pred_latent[:, :-1] / 0.18215).sample
             # z = vae.decode(z / 0.18215).sample
             # print(torch.sum(x_noised-x_latent))
             image_compare = torch.concat((x, pred), dim=2)

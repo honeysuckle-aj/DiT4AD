@@ -274,12 +274,10 @@ class GaussianDiffusion:
         """
         if model_kwargs is None:
             model_kwargs = {}
-        B = x.shape[0]
+        B,C = x.shape[:2]
         assert t.shape == (B,)
         model_output = model(x, t, **model_kwargs)
 
-        x_output = x[:, :-1] if x.shape[1] == 5 else x
-        C = x_output.shape[1]
         if isinstance(model_output, tuple):
             model_output, extra = model_output
         else:
@@ -287,8 +285,8 @@ class GaussianDiffusion:
         if self.model_var_type in [ModelVarType.LEARNED, ModelVarType.LEARNED_RANGE]:
             assert model_output.shape == (B, C * 2, *x.shape[2:])
             model_output, model_var_values = th.split(model_output, C, dim=1)
-            min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x_output.shape)
-            max_log = _extract_into_tensor(np.log(self.betas), t, x_output.shape)
+            min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x.shape)
+            max_log = _extract_into_tensor(np.log(self.betas), t, x.shape)
             # The model_var_values is [-1, 1] for [min_var, max_var].
             frac = (model_var_values + 1) / 2
             model_log_variance = frac * max_log + (1 - frac) * min_log
@@ -306,8 +304,8 @@ class GaussianDiffusion:
                     self.posterior_log_variance_clipped,
                 ),
             }[self.model_var_type]
-            model_variance = _extract_into_tensor(model_variance, t, x_output.shape)
-            model_log_variance = _extract_into_tensor(model_log_variance, t, x_output.shape)
+            model_variance = _extract_into_tensor(model_variance, t, x.shape)
+            model_log_variance = _extract_into_tensor(model_log_variance, t, x.shape)
 
         def process_xstart(x):
             if denoised_fn is not None:
@@ -320,9 +318,9 @@ class GaussianDiffusion:
             pred_xstart = process_xstart(model_output)
         else:
             pred_xstart = process_xstart(
-                self._predict_xstart_from_eps(x_t=x[:, :-1], t=t, eps=model_output)
+                self._predict_xstart_from_eps(x_t=x, t=t, eps=model_output)
             )
-        model_mean, _, _ = self.q_posterior_mean_variance(x_start=pred_xstart, x_t=x[:, :-1], t=t)
+        model_mean, _, _ = self.q_posterior_mean_variance(x_start=pred_xstart, x_t=x, t=t)
 
         # assert model_mean.shape == model_log_variance.shape == pred_xstart.shape == x[:,:-1].shape
         return {
@@ -380,7 +378,6 @@ class GaussianDiffusion:
             model,
             x,
             t,
-            guidance=None,
             clip_denoised=True,
             denoised_fn=None,
             cond_fn=None,
@@ -391,7 +388,6 @@ class GaussianDiffusion:
         :param model: the model to sample from.
         :param x: the current tensor at x_{t-1}.
         :param t: the value of t, starting at 0 for the first diffusion step.
-        :param guidance:
         :param clip_denoised: if True, clip the x_start prediction to [-1, 1].
         :param denoised_fn: if not None, a function which applies to the
             x_start prediction before it is used to sample.
@@ -404,8 +400,6 @@ class GaussianDiffusion:
                  - 'pred_xstart': a prediction of x_0.
         """
         noise = th.randn_like(x)
-        if guidance is not None:
-            x = torch.cat((x, guidance), dim=1)
         out = self.p_mean_variance(
             model,
             x,
@@ -428,7 +422,6 @@ class GaussianDiffusion:
             model,
             shape,
             noise=None,
-            guidance=None,
             clip_denoised=True,
             denoised_fn=None,
             cond_fn=None,
@@ -442,7 +435,6 @@ class GaussianDiffusion:
         :param shape: the shape of the samples, (N, C, H, W).
         :param noise: if specified, the noise from the encoder to sample.
                       Should be of the same shape as `shape`.
-        :param guidance:
         :param clip_denoised: if True, clip x_start predictions to [-1, 1].
         :param denoised_fn: if not None, a function which applies to the
             x_start prediction before it is used to sample.
@@ -460,7 +452,6 @@ class GaussianDiffusion:
                 model,
                 shape,
                 noise=noise,
-                guidance=guidance,
                 clip_denoised=clip_denoised,
                 denoised_fn=denoised_fn,
                 cond_fn=cond_fn,
@@ -476,7 +467,6 @@ class GaussianDiffusion:
             model,
             shape,
             noise=None,
-            guidance=None,
             clip_denoised=True,
             denoised_fn=None,
             cond_fn=None,
@@ -513,7 +503,6 @@ class GaussianDiffusion:
                     model,
                     img,
                     t,
-                    guidance=guidance,
                     clip_denoised=clip_denoised,
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
@@ -703,7 +692,7 @@ class GaussianDiffusion:
                  - 'pred_xstart': the x_0 predictions.
         """
         true_mean, _, true_log_variance_clipped = self.q_posterior_mean_variance(
-            x_start=x_start, x_t=x_t[:, :-1], t=t
+            x_start=x_start, x_t=x_t, t=t
         )
         out = self.p_mean_variance(
             model, x_t, t, clip_denoised=clip_denoised, model_kwargs=model_kwargs
@@ -724,7 +713,7 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, x_mask_start, t, model_kwargs=None, noise=None, guidance=None,
+    def training_losses(self, model, x_start, x_mask_start, t, model_kwargs=None, noise=None,
                         sum_steps=1000):
         """
         Compute training losses for a single timestep.
@@ -735,7 +724,6 @@ class GaussianDiffusion:
         :param model_kwargs: if not None, a dict of extra keyword arguments to
             pass to the model. This can be used for conditioning.
         :param noise: if specified, the specific Gaussian noise to try to remove.
-        :param guidance: gray noised image to guide the reconstruction
         :param sum_steps: total sampling steps
         :return: a dict with the key "loss" containing a tensor of shape [N].
                  Some mean or variance settings may also have other keys.
@@ -746,8 +734,6 @@ class GaussianDiffusion:
             noise = th.randn_like(x_start)
 
         x_t = self.q_sample(x_mask_start, t, noise=noise)
-        if guidance is not None:
-            x_t = torch.cat((x_t, guidance), dim=1)  # concatenate in channel dimension
         terms = {}
 
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:  # L_{vlb}
@@ -769,8 +755,6 @@ class GaussianDiffusion:
                 ModelVarType.LEARNED_RANGE,
             ]:
                 B, C = x_t.shape[:2]
-                if guidance is not None:
-                    C = C - 1
                 assert model_output.shape == (B, C * 2, *x_t.shape[2:])
                 model_output, model_var_values = th.split(model_output, C, dim=1)
                 # Learn the variance using the variational bound, but don't let
@@ -790,7 +774,7 @@ class GaussianDiffusion:
 
             target = {
                 ModelMeanType.PREVIOUS_X: self.q_posterior_mean_variance(
-                    x_start=x_start, x_t=x_t[:, :-1], t=t
+                    x_start=x_start, x_t=x_t, t=t
                 )[0],
                 ModelMeanType.START_X: x_start,
                 ModelMeanType.EPSILON: noise,
