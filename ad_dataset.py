@@ -100,7 +100,8 @@ def get_guidance_channel(image, image_size=256):
     gray_img = image.convert('L').resize((image_size//8, image_size//8))
     # gray_img = np.array(gray_img)
     # noise = np.random.normal(0, 256, gray_img.shape)
-    return Image.fromarray(gray_img)
+    # return Image.fromarray(gray_img)
+    return gray_img
 
 
 class MaskedDataset(Dataset):
