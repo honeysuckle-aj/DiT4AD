@@ -9,7 +9,6 @@ A minimal training script for DiT using PyTorch DDP.
 """
 import torch
 from torch.utils.data import DataLoader
-import numpy as np
 from collections import OrderedDict
 from copy import deepcopy
 from glob import glob
@@ -129,7 +128,7 @@ def main(args):
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.98)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-6, weight_decay=0.99)
 
     # Setup data:
     # transform = transforms.Compose([
@@ -169,8 +168,8 @@ def main(args):
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-    reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
-    # Variables for monitoring/logging purposes:
+    # reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
+    # Variables for monitori ng/logging purposes:
     start_time = time()
     # sum_loss = 0
 
@@ -276,9 +275,9 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=10)
-    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
-    parser.add_argument("--pre-trained", type=str, default="")
+    parser.add_argument("--pre-trained", type=str, default=r"results/003-Guided/checkpoints/last.pt")
     args = parser.parse_args()
     main(args)

@@ -278,7 +278,7 @@ class GaussianDiffusion:
         assert t.shape == (B,)
         model_output = model(x, t, **model_kwargs)
 
-        x_output = x[:, :-1] if x.shape[1] == 5 else x
+        x_output = x[:, :-1] if x.shape[1] == 5 else x  # only for size check
         C = x_output.shape[1]
         if isinstance(model_output, tuple):
             model_output, extra = model_output
@@ -290,6 +290,8 @@ class GaussianDiffusion:
             min_log = _extract_into_tensor(self.posterior_log_variance_clipped, t, x_output.shape)
             max_log = _extract_into_tensor(np.log(self.betas), t, x_output.shape)
             # The model_var_values is [-1, 1] for [min_var, max_var].
+            # in I-DDPM here is the interpolation of beta and \tiled{beta}
+            # model_var_values represents the weight vector 'v'
             frac = (model_var_values + 1) / 2
             model_log_variance = frac * max_log + (1 - frac) * min_log
             model_variance = th.exp(model_log_variance)
