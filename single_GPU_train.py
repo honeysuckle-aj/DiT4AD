@@ -169,7 +169,7 @@ def main(args):
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
     ema.eval()  # EMA model should always be in eval mode
-    reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
+    # reconstruct(model, test_loader, output_folder=args.output_folder, vae=vae, device=device, batch_size=8)
     # Variables for monitoring/logging purposes:
     start_time = time()
     # sum_loss = 0
@@ -247,7 +247,7 @@ def main(args):
             # dist.barrier()
             # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
             # logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
             model.train()
 
@@ -274,9 +274,9 @@ if __name__ == "__main__":
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
-    parser.add_argument("--num-workers", type=int, default=2)
+    parser.add_argument("--num-workers", type=int, default=6)
     parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=10)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
     parser.add_argument("--pre-trained", type=str, default="")
