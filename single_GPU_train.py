@@ -124,7 +124,7 @@ def main(args):
     requires_grad(ema, False)
     # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
     diffusion = create_diffusion(timestep_respacing="",
-                                 diffusion_steps=200)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+                                 diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
@@ -182,8 +182,8 @@ def main(args):
         for epoch in p_bar:
             epoch_loss = 0
             # sampler.set_epoch(epoch)
-            t_mask = 100  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
-            mask_epoch = 10  # masked images will be trained once every 10 epochs
+            t_mask = 10  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
+            mask_epoch = 10  # masked images will be trained once in every 10 epochs
             for i, (img, mask_img, mask, guidance) in enumerate(loader):
                 img = img.to(device)
                 mask_img = mask_img.to(device)
@@ -196,8 +196,8 @@ def main(args):
                     # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
                     img = vae.encode(img).latent_dist.sample().mul_(0.18215)
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
-                img = torch.cat((img, guidance),dim=1)
-                mask_img = torch.cat((mask_img, guidance),dim=1)
+                img = torch.cat((img, guidance), dim=1)
+                mask_img = torch.cat((mask_img, guidance), dim=1)
                 if i % mask_epoch == mask_epoch - 1:
                     # train masked images
                     t = torch.randint(diffusion.num_timesteps - t_mask, diffusion.num_timesteps, (img.shape[0],),
@@ -272,7 +272,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="Guided-2")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)
     parser.add_argument("--num-classes", type=int, default=1000)
-    parser.add_argument("--epochs", type=int, default=6000)
+    parser.add_argument("--epochs", type=int, default=4000)
     parser.add_argument("--global-batch-size", type=int, default=256)
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training

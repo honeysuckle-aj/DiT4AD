@@ -21,6 +21,10 @@ def mean_flat(tensor):
     return tensor.mean(dim=list(range(1, len(tensor.shape))))
 
 
+def guidance_t(t, ratio=4):
+    return t // ratio
+
+
 class ModelMeanType(enum.Enum):
     """
     Which type of output the model predicts.
@@ -230,6 +234,31 @@ class GaussianDiffusion:
                 + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
+    def q_guidance_sample(self, x_start, t):
+        """
+        the last channel of x_start is guidance channel.
+        the noise level of the guidance channel is weaker than those of normal channels.
+        """
+        x_pure = x_start[:, :-1]
+        x_guidance = x_start[:, -1].unsqueeze(1)
+        noise = th.randn_like(x_pure)
+        noise_g = th.randn_like(x_guidance)
+        x_t = _extract_into_tensor(self.sqrt_alphas_cumprod, t, x_pure.shape) * x_pure + _extract_into_tensor(
+            self.sqrt_one_minus_alphas_cumprod, t, x_pure.shape) * noise
+        x_g_t = _extract_into_tensor(self.sqrt_alphas_cumprod, guidance_t(t),
+                                     x_guidance.shape) * x_guidance + _extract_into_tensor(
+            self.sqrt_one_minus_alphas_cumprod, guidance_t(t), x_guidance.shape) * noise_g
+        return torch.cat((x_t, x_g_t), dim=1), torch.cat((noise, noise_g), dim=1)
+
+    def fix_guidance(self, x, t):
+        x_pure = x[:, :-1]
+        x_guidance = x[:, -1].unsqueeze(1)
+        noise_g = th.randn_like(x_guidance)
+        x_g_t = _extract_into_tensor(self.sqrt_alphas_cumprod, guidance_t(t),
+                                     x_guidance.shape) * x_guidance + _extract_into_tensor(
+            self.sqrt_one_minus_alphas_cumprod, guidance_t(t), x_guidance.shape) * noise_g
+        return torch.cat((x_pure, x_g_t), dim=1)
+
     def q_posterior_mean_variance(self, x_start, x_t, t):
         """
         Compute the mean and variance of the diffusion posterior:
@@ -274,7 +303,7 @@ class GaussianDiffusion:
         """
         if model_kwargs is None:
             model_kwargs = {}
-        B,C = x.shape[:2]
+        B, C = x.shape[:2]
         assert t.shape == (B,)
         model_output = model(x, t, **model_kwargs)
 
@@ -402,7 +431,7 @@ class GaussianDiffusion:
         noise = th.randn_like(x)
         out = self.p_mean_variance(
             model,
-            x,
+            self.fix_guidance(x, t),  # guidance channel
             t,
             clip_denoised=clip_denoised,
             denoised_fn=denoised_fn,
@@ -730,10 +759,10 @@ class GaussianDiffusion:
         """
         if model_kwargs is None:
             model_kwargs = {}
-        if noise is None:
-            noise = th.randn_like(x_start)
+        # if noise is None:
+        #     noise = th.randn_like(x_start)
 
-        x_t = self.q_sample(x_mask_start, t, noise=noise)
+        x_t, noise = self.q_guidance_sample(x_mask_start, t)
         terms = {}
 
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:  # L_{vlb}

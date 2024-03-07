@@ -117,10 +117,12 @@ class MaskedDataset(Dataset):
             image_i = random_rotate(Image.open(self.image_path[i]))  # height * width * channel + rotation
             # image_i = rearrange(image_i, "h w c -> c h w") 
             self.images.append(transform(image_i))
-            self.guidance.append(guidance_transform(get_guidance_channel(image_i)))
+
             texture_mask, mask = make_mask(textures[i % len(textures)], size=image_size)
+            mask_img = add_mask(image_i, mask, texture_mask)
+            self.guidance.append(guidance_transform(get_guidance_channel(mask_img)))
             self.masked_images.append(
-                transform(add_mask(image_i, mask, texture_mask)))
+                transform(mask_img))
             self.masks.append(mask)
         self.images = torch.tensor(np.array(self.images), dtype=torch.float)
         self.masked_images = torch.tensor(np.array(self.masked_images), dtype=torch.float)
