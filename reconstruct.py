@@ -27,7 +27,7 @@ torch.backends.cudnn.allow_tf32 = True
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
     t = torch.LongTensor([(len(diffusion.use_timesteps) - 1)//2 for _ in range(batch_size)]).to(device)
@@ -38,12 +38,12 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
             x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
             x_noised = diffusion.q_sample(x_latent, t)
             # z = torch.randn_like(x_noised, device=device)
-            pred_latent = diffusion.p_sample_loop(model, x_noised.shape, noise=x_noised)
+            pred_latent = diffusion.p_sample_loop(model, x_latent, x_noised.shape, noise=x_noised)
             pred = vae.decode(pred_latent / 0.18215).sample
             # z = vae.decode(z / 0.18215).sample
             # print(torch.sum(x_noised-x_latent))
             image_compare = torch.concat((x, pred), dim=2)
-            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=2, normalize=True,
+            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=4, normalize=True,
                        value_range=(-1, 1))
 
 
