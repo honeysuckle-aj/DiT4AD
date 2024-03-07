@@ -30,7 +30,7 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([(len(diffusion.use_timesteps) - 1)//2 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i, (x, y) in pbar:
             x = x.to(device)
@@ -113,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument("--cfg-scale", type=float, default=4.0)
     parser.add_argument("--num-sampling-steps", type=int, default=250)
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--ckpt", type=str, default="ckpts/last.pt",
+    parser.add_argument("--ckpt", type=str, default="results/008-DiT-L-4/checkpoints/last.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     parser.add_argument("--output-folder", type=str, default=r"samples")
     args = parser.parse_args()

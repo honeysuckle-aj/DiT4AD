@@ -164,8 +164,10 @@ def main(args):
     test_loader = DataLoader(test_set, batch_size=8, drop_last=True)
     logger.info(f"Training Dataset contains {len(dataset)} images")
     logger.info(f"Eval Dataset contains {len(test_set)} images")
-    #  before training, test reconstruct
-    reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
+
+    # before training, test reconstruction
+    # reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
+
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance

@@ -399,7 +399,7 @@ class GaussianDiffusion:
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
-            w=0.1,
+            w=0.01,
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
