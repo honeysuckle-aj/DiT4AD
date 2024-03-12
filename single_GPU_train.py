@@ -124,12 +124,12 @@ def main(args):
     requires_grad(ema, False)
     # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
     diffusion = create_diffusion(timestep_respacing="",
-                                 diffusion_steps=200)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+                                 diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.98)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.99)
 
     # Setup data:
     # transform = transforms.Compose([
@@ -165,6 +165,9 @@ def main(args):
     logger.info(f"Training Dataset contains {len(dataset)} images")
     logger.info(f"Eval Dataset contains {len(test_set)} images")
 
+    # before training, test reconstruction
+    # reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
+
     # Prepare models for training:
     update_ema(ema, model, decay=0)  # Ensure EMA is initialized with synced weights
     model.train()  # important! This enables embedding dropout for classifier-free guidance
@@ -182,7 +185,7 @@ def main(args):
         for epoch in p_bar:
             epoch_loss = 0
             # sampler.set_epoch(epoch)
-            t_mask = 100  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
+            t_mask = 10  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
             mask_epoch = 10  # masked images will be trained once every 10 epochs
             for i, (img, mask_img, mask) in enumerate(loader):
                 img = img.to(device)
@@ -240,13 +243,13 @@ def main(args):
                 "opt": opt.state_dict(),
                 "args": args
             }
-            checkpoint_path = "last.pt"
+            checkpoint_path = f"{checkpoint_dir}/last.pt"
             torch.save(checkpoint, checkpoint_path)
             logger.info(f"Saved checkpoint to {checkpoint_path}")
             # dist.barrier()
             # p_bar.set_postfix(loss=sum_loss, train_step=train_steps)
             # logger.info(f"(epoch={epoch:07d}) Train Loss: {sum_loss:.4f}")
-            torch.cuda.empty_cache()
+            # torch.cuda.empty_cache()
             reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
             model.train()
 
@@ -261,9 +264,9 @@ if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\train\good")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\train\good")
     parser.add_argument("--test-set", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
@@ -275,9 +278,9 @@ if __name__ == "__main__":
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=10)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
+    parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
     parser.add_argument("--pre-trained", type=str, default="")
     args = parser.parse_args()
     main(args)
