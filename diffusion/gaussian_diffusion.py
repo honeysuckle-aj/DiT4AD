@@ -181,6 +181,7 @@ class GaussianDiffusion:
 
         # calculations for diffusion q(x_t | x_{t-1}) and others
         self.sqrt_alphas_cumprod = np.sqrt(self.alphas_cumprod)
+        self.sqrt_alphas_cumprod_prev = np.append(1.0, self.sqrt_alphas_cumprod[:-1])
         self.sqrt_one_minus_alphas_cumprod = np.sqrt(1.0 - self.alphas_cumprod)
         self.log_one_minus_alphas_cumprod = np.log(1.0 - self.alphas_cumprod)
         self.sqrt_recip_alphas_cumprod = np.sqrt(1.0 / self.alphas_cumprod)
@@ -231,7 +232,7 @@ class GaussianDiffusion:
                 + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w):
+    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w=0.6):
         """
         from DDAM
         epsilon = epsilon(x) - w * sqrt(1-alpha_t) * (y_t-x_t)
@@ -365,11 +366,16 @@ class GaussianDiffusion:
         new_mean = p_mean_var["mean"].float() + p_mean_var["variance"] * gradient.float()
         return new_mean
 
-    def DDAM_condition_mean(self, x_t, t, tilde_noise, p_mean_var):
+    def DDAM_condition_mean(self, x_t, t, tilde_noise, p_mean_var, ddim=False):
         f_x = (x_t - _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, tilde_noise.shape) * tilde_noise) \
               / _extract_into_tensor(self.sqrt_alphas_cumprod, t, tilde_noise.shape)
-        var_t = th.sqrt(1-_extract_into_tensor(self.alphas_cumprod, t-1, tilde_noise.shape)-p_mean_var["variance"])*tilde_noise
-        return _extract_into_tensor(self.sqrt_alphas_cumprod, t - 1, f_x.shape) * f_x + var_t
+        if ddim:
+            var_t = th.sqrt(1 - _extract_into_tensor(self.alphas_cumprod_prev, t, tilde_noise.shape) - p_mean_var[
+                "variance"]) * tilde_noise
+            return _extract_into_tensor(self.sqrt_alphas_cumprod_prev, t, f_x.shape) * f_x + var_t
+        else:
+            var_t = th.sqrt(1-_extract_into_tensor(self.alphas_cumprod, t, tilde_noise.shape)-p_mean_var["variance"])*tilde_noise
+            return _extract_into_tensor(self.sqrt_alphas_cumprod, t, f_x.shape) * f_x + var_t
 
     def condition_score(self, cond_fn, p_mean_var, x, t, model_kwargs=None):
         """
@@ -541,6 +547,7 @@ class GaussianDiffusion:
     def ddim_sample(
             self,
             model,
+            x_start,
             x,
             t,
             clip_denoised=True,
@@ -566,8 +573,11 @@ class GaussianDiffusion:
 
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
+        if th.max(t) >= 5:
+            y_t = self.q_sample(x_start, t)
+            updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x)
+            out["pred_xstart"] = self._predict_xstart_from_eps(x, t, updated_noise)
         eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])
-
         alpha_bar = _extract_into_tensor(self.alphas_cumprod, t, x.shape)
         alpha_bar_prev = _extract_into_tensor(self.alphas_cumprod_prev, t, x.shape)
         sigma = (
@@ -628,6 +638,7 @@ class GaussianDiffusion:
     def ddim_sample_loop(
             self,
             model,
+            x_start,
             shape,
             noise=None,
             clip_denoised=True,
@@ -645,6 +656,7 @@ class GaussianDiffusion:
         final = None
         for sample in self.ddim_sample_loop_progressive(
                 model,
+                x_start,
                 shape,
                 noise=noise,
                 clip_denoised=clip_denoised,
@@ -661,6 +673,7 @@ class GaussianDiffusion:
     def ddim_sample_loop_progressive(
             self,
             model,
+            x_start,
             shape,
             noise=None,
             clip_denoised=True,
@@ -696,6 +709,7 @@ class GaussianDiffusion:
             with th.no_grad():
                 out = self.ddim_sample(
                     model,
+                    x_start,
                     img,
                     t,
                     clip_denoised=clip_denoised,
@@ -738,7 +752,8 @@ class GaussianDiffusion:
         # At the first timestep return the decoder NLL,
         # otherwise return KL(q(x_{t-1}|x_t,x_0) || p(x_{t-1}|x_t))
         output = th.where((t == 0), decoder_nll, kl)
-        return {"output": output, "pred_xstart": out["pred_xstart"]}
+        # rename output to loss
+        return {"loss": output, "pred_xstart": out["pred_xstart"]}
 
     def training_losses(self, model, x_start, x_mask_start, t, model_kwargs=None, noise=None, sum_steps=1000):
         """
@@ -764,14 +779,14 @@ class GaussianDiffusion:
         terms = {}
 
         if self.loss_type == LossType.KL or self.loss_type == LossType.RESCALED_KL:  # L_{vlb}
-            terms["loss"] = self._vb_terms_bpd(
+            terms = self._vb_terms_bpd(
                 model=model,
                 x_start=x_start,
                 x_t=x_t,
                 t=t,
                 clip_denoised=False,
                 model_kwargs=model_kwargs,
-            )["output"]
+            )
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
@@ -787,13 +802,14 @@ class GaussianDiffusion:
                 # Learn the variance using the variational bound, but don't let
                 # it affect our mean prediction.
                 frozen_out = th.cat([model_output.detach(), model_var_values], dim=1)
-                terms["vb"] = self._vb_terms_bpd(
+                terms = self._vb_terms_bpd(
                     model=lambda *args, r=frozen_out: r,
                     x_start=x_start,
                     x_t=x_t,
                     t=t,
                     clip_denoised=False,
-                )["output"]
+                )
+                terms["vb"] = terms["loss"]
                 if self.loss_type == LossType.RESCALED_MSE:
                     # Divide by 1000 for equivalence with initial implementation.
                     # Without a factor of 1/1000, the VB term hurts the MSE term.
@@ -814,7 +830,6 @@ class GaussianDiffusion:
                 terms["loss"] = terms["mse"]
         else:
             raise NotImplementedError(self.loss_type)
-
         return terms
 
     def _prior_bpd(self, x_start):

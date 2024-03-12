@@ -13,7 +13,11 @@ import torch
 import torch.nn as nn
 import numpy as np
 import math
-from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
+
+from einops import rearrange
+from timm.models.vision_transformer import PatchEmbed, Attention, Mlp, Block
+
+from ad_dataset import pair
 
 
 def modulate(x, shift, scale):
@@ -99,6 +103,7 @@ class LabelEmbedder(nn.Module):
 #################################################################################
 #                                 Core DiT Model                                #
 #################################################################################
+
 
 class DiTBlock(nn.Module):
     """
@@ -234,7 +239,7 @@ class DiT(nn.Module):
 
         x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        imgs = x.reshape((x.shape[0], c, h * p, h * p))
         return imgs
 
     def forward(self, x, t):
@@ -273,6 +278,61 @@ class DiT(nn.Module):
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
+
+
+class ViT(nn.Module):
+    def __init__(self, *, input_size, patch_size, output_size, hidden_size, depth, num_heads, mlp_ratio=4,
+                 in_channels=3, out_channels=1,
+                 dropout=0.):
+        super().__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.out_channels = out_channels
+        image_height, image_width = pair(input_size)  # 256 * 256
+        patch_height, patch_width = pair(patch_size)  # 16 * 16
+
+        assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+
+        num_patches = (image_height // patch_height) * (image_width // patch_width)
+
+        self.patch_embed = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size))
+        self.blocks = nn.ModuleList([
+            Block(hidden_size, num_heads, mlp_ratio=mlp_ratio, attn_drop=dropout) for _ in range(depth)
+        ])
+        self.mlp = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, output_size ** 2)
+        )
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)
+
+        # Initialize (and freeze) pos_embed by sin-cos embedding:
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches ** 0.5))
+        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+
+        # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
+        w = self.patch_embed.proj.weight.data
+        nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        nn.init.constant_(self.patch_embed.proj.bias, 0)
+
+    def forward(self, img):
+        x = self.patch_embed(img) + self.pos_embed  # img 1 9 256 256
+        b, n, _ = x.shape
+        for block in self.blocks:
+            x = block(x)
+        x = torch.mean(x, dim=1)
+        x = self.mlp(x)
+        return rearrange(x, "b (w h) -> b w h", w=self.output_size, h=self.output_size)
 
 
 #################################################################################
@@ -383,7 +443,7 @@ def DiT_S_8(**kwargs):
 
 
 def DiT_Guided(**kwargs):  # DiT L/4 -> in channel = 5
-    return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16,  **kwargs)
+    return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16, **kwargs)
 
 
 DiT_models = {
