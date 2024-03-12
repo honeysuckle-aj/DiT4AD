@@ -399,7 +399,7 @@ class GaussianDiffusion:
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
-            w=0.01,
+            w=0.7,
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
@@ -431,10 +431,10 @@ class GaussianDiffusion:
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-
-        y_t = self.q_sample(x_start, t, out["pred_noise"])
-        updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x, w)
-        out["mean"] = self.DDAM_condition_mean(x, t, updated_noise, out)
+        if th.max(t) >= 5:
+            y_t = self.q_sample(x_start, t, out["pred_noise"])
+            updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x, w)
+            out["mean"] = self.DDAM_condition_mean(x, t, updated_noise, out)
         if cond_fn is not None:
             out["mean"] = self.condition_mean(cond_fn, out, x, t, model_kwargs=model_kwargs)
         sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise

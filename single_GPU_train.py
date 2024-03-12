@@ -129,7 +129,7 @@ def main(args):
     logger.info(f"DiT Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.98)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-5, weight_decay=0.99)
 
     # Setup data:
     # transform = transforms.Compose([
@@ -264,9 +264,9 @@ if __name__ == "__main__":
     # Default args here will train DiT-XL/2 with the hyperparameters we used in our paper (except training iters).
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-path", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\train\good")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\train\good")
     parser.add_argument("--test-set", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\capsule\test")
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test")
     parser.add_argument("--texture-path", type=str, default="dataset/textures")
     parser.add_argument("--results-dir", type=str, default="results")
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
@@ -280,7 +280,7 @@ if __name__ == "__main__":
     parser.add_argument("--log-every-epoch", type=int, default=100)
     parser.add_argument("--ckpt-every-epoch", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=16)
-    parser.add_argument("--output-folder", type=str, default="samples/mask_capsule")
+    parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
     parser.add_argument("--pre-trained", type=str, default="")
     args = parser.parse_args()
     main(args)
