@@ -73,7 +73,7 @@ def create_logger(logging_dir):
 
     logging.basicConfig(
         level=logging.INFO,
-        format='[\033[34m%(asctime)s\033[0m] %(message)s',
+        format='[ [34m%(asctime)s [0m] %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S',
         handlers=[logging.StreamHandler(), logging.FileHandler(f"{logging_dir}/log.txt")]
     )
@@ -114,17 +114,20 @@ def main(args):
         input_size=latent_size,
         # num_classes=args.num_classes
     )
-    checkpoint = find_model(args.DiT_model)
-    recon_model.load_state_dict(checkpoint["ema"])
-    seg_model = ViT(input_size=256, patch_size=16, output_size=256, hidden_size=768, depth=3, num_heads=6, mlp_ratio=4,
+    recon_checkpoint = find_model(args.DiT_model)
+    recon_model.load_state_dict(recon_checkpoint["ema"])
+    seg_model = ViT(input_size=256, patch_size=16, output_size=256, hidden_size=768, depth=3, num_heads=3, mlp_ratio=4,
                     in_channels=9, dropout=0.1)
+    if args.pre_trained is not None:
+        seg_checkpoint = find_model(args.pre_trained)
+        seg_model.load_state_dict(seg_checkpoint["model"])
     # use pre-trained model
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     recon_model = recon_model.to(device)
     seg_model = seg_model.to(device)
-    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=1e-5, weight_decay=0.99)
+    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=1e-4, weight_decay=0.99)
 
-    diffusion = create_diffusion(timestep_respacing="ddim20",
+    diffusion = create_diffusion(timestep_respacing="ddim10",
                                  diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in recon_model.parameters()):,}")
@@ -159,10 +162,10 @@ def main(args):
     # Variables for monitoring/logging purposes:
     start_time = time()
     # sum_loss = 0
-    seg_loss_func = torch.nn.BCEWithLogitsLoss(reduction='sum')
+    seg_loss_func = torch.nn.BCELoss(reduction='mean')
     logger.info(f"Training for {args.epochs} epochs...")
     t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(args.batch_size)]).to(device)
-    segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size, image_size=256)
+    # segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size, image_size=256)
     for epoch_batch in range(args.epochs // args.log_every_epoch):
         logger.info(f"Beginning epoch batch {epoch_batch}...")
         p_bar = tqdm(range(args.log_every_epoch), desc=f"Training {epoch_batch} th epoch batch", unit="epoch")
@@ -245,9 +248,9 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=6)
-    parser.add_argument("--log-every-epoch", type=int, default=100)
+    parser.add_argument("--log-every-epoch", type=int, default=25)
     parser.add_argument("--ckpt-every-epoch", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=20)
+    parser.add_argument("--batch-size", type=int, default=28)
     parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
     parser.add_argument("--DiT-model", type=str, default="results/DiT-L-4-cable/checkpoints/last.pt")
     parser.add_argument("--pre-trained", type=str, default="")

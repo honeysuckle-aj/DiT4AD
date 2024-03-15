@@ -302,7 +302,8 @@ class ViT(nn.Module):
         ])
         self.mlp = nn.Sequential(
             nn.LayerNorm(hidden_size),
-            nn.Linear(hidden_size, output_size ** 2)
+            nn.Linear(hidden_size, output_size ** 2),
+            nn.Sigmoid()
         )
         self.initialize_weights()
 
@@ -334,7 +335,19 @@ class ViT(nn.Module):
         x = self.mlp(x)
         return rearrange(x, "b (w h) -> b w h", w=self.output_size, h=self.output_size)
 
+class SegCNN(nn.Module):
+    def __init__(self, in_channels, out_channels, dropout=0.):
+        super().__init__()
+        self.conv_down1 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, padding=1)
+        self.conv_down2 = nn.Conv2d(in_channels=in_channels, out_channels=16, kernel_size=3, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size=2)
+        self.conv_up = nn.ConvTranspose2d(in_channels=16, out_channels=6, kernel_size=2, stride=2)
+        self.conv_out = nn.Conv2d(in_channels=6, out_channels=out_channels, kernel_size=3, padding=1)
 
+        self.nn_seq = nn.Sequential(self.conv_down1, self.conv_down2, self.pool1, self.conv_up, self.conv_out, nn.Sigmoid())
+
+    def forward(self, x):
+        return self.nn_seq(x)
 #################################################################################
 #                   Sine/Cosine Positional Embedding Functions                  #
 #################################################################################

@@ -26,13 +26,24 @@ transform = transforms.Compose([transforms.Resize([256, 256]),
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
+def make_bar(mask, bar_num=5):
+    h, w = mask.shape
+    for i in range(bar_num):
+        bar_h = np.random.randint(h//10, h//2)
+        bar_w = np.random.randint(w//10, w//2)
+        bar_y = np.random.randint(0, h-bar_h)
+        bar_x = np.random.randint(0, w-bar_w)
+        mask[bar_y:bar_y+bar_h, bar_x:bar_x+bar_w] = np.ones((bar_h, bar_w))
+    return mask
 
-def make_mask(texture: np.ndarray, size: tuple, ratio=0.3):
+
+def make_mask(texture: np.ndarray, size: tuple):
     """
     make a mask using a texture image
     texture shape: (h w c)
     """
-    mask = np.random.choice([0, 1], size=size, p=[1 - ratio, ratio])
+    mask = np.zeros(size)
+    mask = make_bar(mask)
     texture_mask = texture * repeat(mask, "h w -> h w c", c=3)
     return texture_mask, mask
 
