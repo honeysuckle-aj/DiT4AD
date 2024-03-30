@@ -57,7 +57,7 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([20 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([10 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i, (x, y) in pbar:
             x = x.to(device)
@@ -87,12 +87,12 @@ def segmentation(recon_model, seg_model, loader, output_folder, vae, device, bat
     with torch.no_grad():
         for i, (x, y) in pbar:
             x = x.to(device)
-            y = y.to(device)
+            # y = y.to(device)
             latent_x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             noised_x = diffusion.q_sample(latent_x, t)
             pred_latent_x = diffusion.ddim_sample_loop(recon_model, latent_x, noised_x.shape, noise=noised_x)
 
-            inter_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
+            # inter_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
             pred_x = vae.decode(pred_latent_x / 0.18215).sample
             seg_input = torch.cat((x, pred_x), dim=1)
             loss, pred_y = seg_model(seg_input)

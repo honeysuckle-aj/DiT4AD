@@ -232,7 +232,7 @@ class GaussianDiffusion:
                 + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w=0.6):
+    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w=0.3):
         """
         from DDAM
         epsilon = epsilon(x) - w * sqrt(1-alpha_t) * (y_t-x_t)
@@ -443,7 +443,7 @@ class GaussianDiffusion:
             out["mean"] = self.DDAM_condition_mean(x, t, updated_noise, out)
         if cond_fn is not None:
             out["mean"] = self.condition_mean(cond_fn, out, x, t, model_kwargs=model_kwargs)
-        sample = out["mean"] + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
+        sample = out["mean"]  # + nonzero_mask * th.exp(0.5 * out["log_variance"]) * noise
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def p_sample_loop(
@@ -578,7 +578,7 @@ class GaussianDiffusion:
 
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
-        if th.max(t) >= 5:
+        if th.max(t) >= 2:
             y_t = self.q_sample(x_start, t)
             updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x)
             out["pred_xstart"] = self._predict_xstart_from_eps(x, t, updated_noise)
@@ -599,7 +599,10 @@ class GaussianDiffusion:
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-        sample = mean_pred + nonzero_mask * sigma * noise
+        if th.max(t) > 1:
+            sample = mean_pred + nonzero_mask * sigma * noise
+        else:
+            sample = mean_pred
         return {"sample": sample, "pred_xstart": out["pred_xstart"]}
 
     def ddim_reverse_sample(

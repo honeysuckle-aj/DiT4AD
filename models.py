@@ -390,14 +390,17 @@ class SegCNN(nn.Module):
         return torch.pow((feat_recon - feat_origin), 2).mean(dim=(1, 2, 3)), out
         # return F.cosine_similarity(feat_recon, feat_origin, dim=0)
 
-    def train_loss(self, criterion, latent_x, pred_latent_x, y, vae, label, ratio=0.8):
+    def train_loss(self, criterion, latent_x, pred_latent_x, y, vae, ratio=0.8):
         with torch.no_grad():
             # inter_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
             x = vae.decode(latent_x / 0.18215).sample
             pred_x = vae.decode(pred_latent_x / 0.18215).sample
         seg_input = torch.cat((x, pred_x), dim=1)
         feat_loss, pred_y = self.forward(seg_input)
-        loss = criterion(pred_y, y) + torch.mean(feat_loss * label)
+        masks = torch.sum(y, dim=(1, 2))
+        label = torch.ones_like(masks)
+        label[torch.where(masks > 0)] = -1
+        loss = criterion(pred_y, y) + torch.mean(feat_loss * label) * 50
         return pred_y, loss
 
 
