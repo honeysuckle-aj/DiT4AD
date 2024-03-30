@@ -21,11 +21,10 @@ import os
 
 from download import find_model
 from models import DiT_models
-from experiment.VIT import ViT, train_seg_loss
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 from ad_dataset import MaskedDataset, TestDataset, load_textures, pair
-from reconstruct import reconstruct
+from reconstruct import reconstruct, segmentation
 
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 
@@ -114,51 +113,31 @@ def main(args):
         input_size=latent_size,
         # num_classes=args.num_classes
     )
-    seg_model = ViT(input_size=256, patch_size=16, output_size=256, dim=1024, depth=3, heads=6, mlp_dim=1024,
-                    channels=9)
     # use pre-trained model
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     recon_model = recon_model.to(device)
-    seg_model = seg_model.to(device)
-    recon_opt = torch.optim.AdamW(recon_model.parameters(), lr=1e-7, weight_decay=0.99)
-    seg_opt = torch.optim.Adam(seg_model.parameters(), lr=1e-6, weight_decay=0.99)
+    recon_opt = torch.optim.AdamW(recon_model.parameters(), lr=1e-6)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(recon_opt, T_max=6)
     if args.pre_trained != "":
         checkpoint = find_model(args.pre_trained)
         recon_model.load_state_dict(checkpoint["ema"])
         recon_opt.load_state_dict(checkpoint["opt"])
 
-
     # Note that parameter initialization is done within the DiT constructor
     ema = deepcopy(recon_model).to(device)  # Create an EMA of the model for use after training
 
     requires_grad(ema, False)
-    # model = DDP(model.to(device), device_ids=[rank])  # parallel computing
     diffusion = create_diffusion(timestep_respacing="",
-                                 diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+                                 diffusion_steps=1000)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+    recon_steps = 200
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in recon_model.parameters()):,}")
-
-
-    # Setup data:
-    # transform = transforms.Compose([
-    #     transforms.Lambda(lambda pil_image: center_crop_arr(pil_image, args.image_size)),
-    #     transforms.RandomHorizontalFlip(),
-    #     transforms.ToTensor(),
-    #     transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5], inplace=True)
-    # ])
 
     textures = load_textures(args.texture_path, image_size=pair(args.image_size))
 
     # dataset = ImageFolder(args.data_path, transform=transform)
     dataset = MaskedDataset(args.data_path, textures=textures)
     test_set = TestDataset(args.test_set)
-    # sampler = DistributedSampler(
-    #     dataset,
-    #     num_replicas=dist.get_world_size(),
-    #     rank=rank,
-    #     shuffle=True,
-    #     seed=args.global_seed
-    # )
     loader = DataLoader(
         dataset,
         # batch_size=int(args.global_batch_size // dist.get_world_size()),
@@ -169,39 +148,35 @@ def main(args):
         # pin_memory=True,
         drop_last=True
     )
-    test_loader = DataLoader(test_set, batch_size=2, drop_last=True)
+    test_loader = DataLoader(test_set, batch_size=args.batch_size, drop_last=True)
     logger.info(f"Training Dataset contains {len(dataset)} images")
     logger.info(f"Eval Dataset contains {len(test_set)} images")
 
     # before training, test reconstruction
-    # reconstruct(model, test_loader, args.output_folder, vae, device, batch_size=8)
-
+    reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
+    # segmentation(recon_model, seg_model, loader, args.output_folder, vae, device, batch_size=args.batch_size)
     # Prepare models for training:
     update_ema(ema, recon_model, decay=0)  # Ensure EMA is initialized with synced weights
     recon_model.train()  # important! This enables embedding dropout for classifier-free guidance
-    seg_model.train()
     ema.eval()  # EMA model should always be in eval mode
 
     # Variables for monitoring/logging purposes:
     start_time = time()
-    # sum_loss = 0
-    seg_loss_func = torch.nn.BCEWithLogitsLoss(reduction='sum')
     logger.info(f"Training for {args.epochs} epochs...")
     for epoch_batch in range(args.epochs // args.log_every_epoch):
         logger.info(f"Beginning epoch batch {epoch_batch}...")
         p_bar = tqdm(range(args.log_every_epoch), desc=f"Training {epoch_batch} th epoch batch", unit="epoch")
         recon_batch_loss = 0
-        seg_batch_loss = 0
+
         for epoch in p_bar:
             recon_epoch_loss = 0
-            seg_epoch_loss = 0
             # sampler.set_epoch(epoch)
             t_mask = 10  # in this 100 steps, the model is trained to reconstruct the origin images from the masked images
             mask_epoch = 10  # masked images will be trained once every 10 epochs
             for i, (img, mask_img, mask) in enumerate(loader):
                 img = img.to(device)
                 mask_img = mask_img.to(device)
-                mask = mask.to(device)
+                # mask = mask.to(device)
                 # x = x.to(device)
                 # y = y.to(device)
                 with torch.no_grad():
@@ -209,15 +184,15 @@ def main(args):
                     # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
                     img = vae.encode(img).latent_dist.sample().mul_(0.18215)
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
-                if i % mask_epoch == mask_epoch - 1:
+                if i % 3 == 0:
                     # train masked images
-                    t = torch.randint(diffusion.num_timesteps - t_mask, diffusion.num_timesteps, (img.shape[0],),
+                    t = torch.randint(recon_steps - t_mask, 200, (img.shape[0],),
                                       device=device)
                     loss_dict = diffusion.training_losses(recon_model, img, mask_img, t,
                                                           sum_steps=diffusion.num_timesteps)
                 else:
                     # train normal images
-                    t = torch.randint(0, diffusion.num_timesteps, (img.shape[0],), device=device)
+                    t = torch.randint(0, recon_steps, (img.shape[0],), device=device)
                     loss_dict = diffusion.training_losses(recon_model, img, img, t, sum_steps=diffusion.num_timesteps)
                 # t = repeat(torch.randint(0, diffusion.num_timesteps, (1,), device=device),"l -> b", b=img.shape[0]) # img.shape[0] -> batch size
                 # TODO
@@ -227,26 +202,20 @@ def main(args):
                 recon_opt.zero_grad()
                 recon_loss.backward()
                 recon_opt.step()
+                scheduler.step()
                 update_ema(ema, recon_model)
-
-                seg_loss = train_seg_loss(seg_model, seg_loss_func, img, loss_dict["pred_xstart"], mask, vae)
-                seg_opt.zero_grad()
-                seg_loss.backward()
-                seg_opt.step()
 
                 # Log loss values:
                 recon_batch_loss += recon_loss.item()
                 recon_epoch_loss += recon_loss.item()
-                seg_batch_loss += seg_loss.item()
-                seg_epoch_loss += seg_loss.item()
-            p_bar.set_postfix(recon_loss=recon_epoch_loss, seg_loss=seg_epoch_loss)
+
+            p_bar.set_postfix(recon_loss=recon_epoch_loss)
 
         end_time = time()
         steps_per_sec = args.log_every_epoch * args.batch_size / (end_time - start_time)
         recon_avg_loss = recon_batch_loss / (args.log_every_epoch * args.batch_size)
-        seg_avg_loss = seg_batch_loss / (args.log_every_epoch * args.batch_size)
         logger.info(
-            f"(epoch batch={epoch_batch:05d}) Reconstruct Loss: {recon_avg_loss:.4f}, Segmentation Loss: {seg_avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+            f"(epoch batch={epoch_batch:05d}) Reconstruct Loss: {recon_avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
         # Reset monitoring variables:
         start_time = time()
 
@@ -259,22 +228,17 @@ def main(args):
                 "opt": recon_opt.state_dict(),
                 "args": args
             }
-            seg_checkpoint = {
-                "model": seg_model.state_dict(),
-                "opt": seg_opt.state_dict(),
-            }
+
             checkpoint_path = checkpoint_dir
             torch.save(recon_checkpoint, f"{checkpoint_path}/recon.pt")
-            torch.save(seg_checkpoint, f"{checkpoint_path}/seg.pt")
             logger.info(f"Saved checkpoint to {checkpoint_path}")
-            reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=8)
+            reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
             recon_model.train()
-            # seg_model.train()
 
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
     logger.info("Training Done!")
-    torch.cuda.empty_cache()
-    reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=8)
+    # torch.cuda.empty_cache()
+    # reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=8)
     # cleanup()
 
 
@@ -297,8 +261,8 @@ if __name__ == "__main__":
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--log-every-epoch", type=int, default=100)
     parser.add_argument("--ckpt-every-epoch", type=int, default=5)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=24)
     parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
-    parser.add_argument("--pre-trained", type=str, default="results/DiT-L-4-cable/checkpoints/last.pt")
+    parser.add_argument("--pre-trained", type=str, default="")
     args = parser.parse_args()
     main(args)

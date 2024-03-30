@@ -4,7 +4,7 @@ import random
 import numpy as np
 import time
 
-from PIL import Image
+from PIL import Image, ImageDraw
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
@@ -22,28 +22,60 @@ transform = transforms.Compose([transforms.Resize([256, 256]),
                                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
                                                      inplace=True)])
 
+augmentation_funcs = ["ellipse", "rectangle"]
+
 
 def pair(t):
     return t if isinstance(t, tuple) else (t, t)
 
-def make_bar(mask, bar_num=5):
+
+def make_bar(mask, bar_num=3):
     h, w = mask.shape
+    # there are 50% of probability that the picture is defected.
+    if random.random() < 0.5:
+        return mask
     for i in range(bar_num):
-        bar_h = np.random.randint(h//10, h//2)
-        bar_w = np.random.randint(w//10, w//2)
-        bar_y = np.random.randint(0, h-bar_h)
-        bar_x = np.random.randint(0, w-bar_w)
-        mask[bar_y:bar_y+bar_h, bar_x:bar_x+bar_w] = np.ones((bar_h, bar_w))
+        bar_h = np.random.randint(h // 10, h // 2)
+        bar_w = np.random.randint(w // 10, w // 2)
+        bar_y = np.random.randint(0, h - bar_h)
+        bar_x = np.random.randint(0, w - bar_w)
+        mask[bar_y:bar_y + bar_h, bar_x:bar_x + bar_w] = np.ones((bar_h, bar_w))
     return mask
 
 
-def make_mask(texture: np.ndarray, size: tuple):
+def cut_paste(image, mask, size):
+    h, w = size
+    x0 = np.random.randint(0, h - 10)
+    y0 = np.random.randint(0, w - 10)
+    x1 = np.random.randint(10, h - 10)
+    y1 = np.random.randint(10, w - 10)
+    dh = np.random.randint(10, h - x0)
+    dw = np.random.randint(10, w - y0)
+    crop = image.crop((x0, y0, x0 + dh, y0 + dw))
+    image.paste(crop, (x1, y1, x1 + dh, y1 + dh))
+    return image, (x1, y1, x1 + dh, y1 + dh)
+
+
+def make_mask(texture: np.ndarray, size: tuple, ratio=0.5):
     """
     make a mask using a texture image
     texture shape: (h w c)
     """
-    mask = np.zeros(size)
-    mask = make_bar(mask)
+    mask = np.zeros(size, dtype=int)
+
+    if random.random() < ratio:
+        mask = Image.fromarray(mask)
+        draw = ImageDraw.Draw(mask)
+        h, w = size
+        func = random.choice(augmentation_funcs)
+        func = getattr(draw, func)
+        x0 = np.random.randint(0, h - 10)
+        y0 = np.random.randint(0, w - 10)
+        x1 = np.random.randint(x0 + 10, h)
+        y1 = np.random.randint(y0 + 10, w)
+        func(xy=[x0, y0, x1, y1], fill='white')
+        mask = np.array(mask, dtype=int) // 255
+
     texture_mask = texture * repeat(mask, "h w -> h w c", c=3)
     return texture_mask, mask
 

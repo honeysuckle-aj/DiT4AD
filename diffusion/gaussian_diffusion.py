@@ -405,7 +405,7 @@ class GaussianDiffusion:
             denoised_fn=None,
             cond_fn=None,
             model_kwargs=None,
-            w=0.7,
+            w=0.,
     ):
         """
         Sample x_{t-1} from the model at the given timestep.
@@ -458,6 +458,7 @@ class GaussianDiffusion:
             model_kwargs=None,
             device=None,
             progress=False,
+            w=0.
     ):
         """
         Generate samples from the model.
@@ -475,6 +476,7 @@ class GaussianDiffusion:
         :param device: if specified, the device to create the samples on.
                        If not specified, use a model parameter's device.
         :param progress: if True, show a tqdm progress bar.
+        :param w:
         :return: a non-differentiable batch of samples.
         """
         final = None
@@ -489,6 +491,7 @@ class GaussianDiffusion:
                 model_kwargs=model_kwargs,
                 device=device,
                 progress=progress,
+                w=w
         ):
             final = sample
         return final["sample"]
@@ -505,6 +508,7 @@ class GaussianDiffusion:
             model_kwargs=None,
             device=None,
             progress=False,
+            w=0.
     ):
         """
         Generate samples from the model and yield intermediate samples from
@@ -540,6 +544,7 @@ class GaussianDiffusion:
                     denoised_fn=denoised_fn,
                     cond_fn=cond_fn,
                     model_kwargs=model_kwargs,
+                    w=w
                 )
                 yield out
                 img = out["sample"]

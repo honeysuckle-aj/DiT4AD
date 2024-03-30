@@ -20,12 +20,11 @@ import logging
 import os
 
 from download import find_model
-from models import DiT_models, ViT
-from experiment.VIT import train_seg_loss
+from models import DiT_models, SegCNN
 from diffusion import create_diffusion
 from diffusers.models import AutoencoderKL
 from ad_dataset import MaskedDataset, TestDataset, load_textures, pair
-from reconstruct import reconstruct, segmentation
+from reconstruct import segmentation
 
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 
@@ -116,21 +115,26 @@ def main(args):
     )
     recon_checkpoint = find_model(args.DiT_model)
     recon_model.load_state_dict(recon_checkpoint["ema"])
-    seg_model = ViT(input_size=256, patch_size=16, output_size=256, hidden_size=768, depth=3, num_heads=3, mlp_ratio=4,
-                    in_channels=9, dropout=0.1)
-    if args.pre_trained is not None:
+    ema = deepcopy(recon_model).to(device)  # Create an EMA of the model for use after training
+    requires_grad(ema, False)
+
+    seg_model = SegCNN(in_channels=3, out_channels=1)
+    if args.pre_trained != "":
         seg_checkpoint = find_model(args.pre_trained)
         seg_model.load_state_dict(seg_checkpoint["model"])
     # use pre-trained model
     # Setup optimizer (we used default Adam betas=(0.9, 0.999) and a constant learning rate of 1e-4 in our paper):
     recon_model = recon_model.to(device)
     seg_model = seg_model.to(device)
-    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=1e-4, weight_decay=0.99)
+    # recon_opt = torch.optim.AdamW(recon_model.parameters(), lr=1e-7, weight_decay=0)
+    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=1e-5)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=seg_opt, T_max=6)
 
-    diffusion = create_diffusion(timestep_respacing="ddim10",
+    diffusion = create_diffusion(timestep_respacing="",
                                  diffusion_steps=100)  # default: 1000 steps, linear noise schedule. in training use ddpm config
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
-    logger.info(f"DiT Parameters: {sum(p.numel() for p in recon_model.parameters()):,}")
+    logger.info(f"DiT Parameters: {sum(p.numel() for p in recon_model.parameters()):,}, "
+                f"SegCNN Parameters: {sum(p.numel() for p in seg_model.parameters()):,}")
 
     textures = load_textures(args.texture_path, image_size=pair(args.image_size))
 
@@ -158,70 +162,83 @@ def main(args):
     recon_model.eval()  # important! This enables embedding dropout for classifier-free guidance
     seg_model.train()
 
-
     # Variables for monitoring/logging purposes:
-    start_time = time()
+    # start_time = time()
     # sum_loss = 0
-    seg_loss_func = torch.nn.BCELoss(reduction='mean')
+    seg_loss_func = torch.nn.BCELoss(reduction='sum')
     logger.info(f"Training for {args.epochs} epochs...")
-    t = torch.LongTensor([len(diffusion.use_timesteps) - 1 for _ in range(args.batch_size)]).to(device)
+
     # segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size, image_size=256)
+    t = torch.ones((args.batch_size,), dtype=torch.long, device=device) * 20
+    t = t.to(device)
     for epoch_batch in range(args.epochs // args.log_every_epoch):
         logger.info(f"Beginning epoch batch {epoch_batch}...")
         p_bar = tqdm(range(args.log_every_epoch), desc=f"Training {epoch_batch} th epoch batch", unit="epoch")
         seg_batch_loss = 0
         for epoch in p_bar:
-            recon_epoch_loss = 0
+            # recon_epoch_loss = 0
             seg_epoch_loss = 0
-            # sampler.set_epoch(epoch)
             for i, (img, mask_img, mask) in enumerate(loader):
                 img = img.to(device)
                 mask_img = mask_img.to(device)
                 mask = mask.to(device)
-                # x = x.to(device)
-                # y = y.to(device)
                 with torch.no_grad():
                     # Map input images to latent space + normalize latents:
                     # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
                     img = vae.encode(img).latent_dist.sample().mul_(0.18215)
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
-                    noised_img = diffusion.q_sample(mask_img, t)
-                    # pred_xstart = diffusion.p_sample(recon_model, mask_img, noised_img, t)["pred_xstart"]
-                    pred_xstart = diffusion.ddim_sample_loop(recon_model, mask_img, mask_img.shape, noised_img)
 
-                # t = repeat(torch.randint(0, diffusion.num_timesteps, (1,), device=device),"l -> b", b=img.shape[0]) # img.shape[0] -> batch size
-                # TODO
-                # model_kwargs = dict(y=y)
-
-                pred_y, seg_loss = train_seg_loss(seg_model, seg_loss_func, mask_img, pred_xstart, mask, vae)
+                    if i % 2 == 0:
+                        noised_img = diffusion.q_sample(x_start=mask_img, t=t)
+                        pred_xstart = diffusion.ddim_sample_loop(recon_model, mask_img, mask_img.shape,
+                                                                 noise=noised_img)
+                        label = -torch.ones(size=(pred_xstart.shape[0],), device=device)
+                    else:
+                        noised_img = diffusion.q_sample(x_start=img, t=t)
+                        pred_xstart = diffusion.ddim_sample_loop(recon_model, img, img.shape,
+                                                                 noise=noised_img)
+                        label = torch.ones(size=(pred_xstart.shape[0],), device=device)
+                pred_y, seg_loss = seg_model.train_loss(seg_loss_func, mask_img, pred_xstart, mask, vae, label)
                 seg_opt.zero_grad()
                 seg_loss.backward()
                 seg_opt.step()
-
+                scheduler.step()
                 # Log loss values:
+
                 seg_batch_loss += seg_loss.item()
                 seg_epoch_loss += seg_loss.item()
-            p_bar.set_postfix(recon_loss=recon_epoch_loss, seg_loss=seg_epoch_loss)
 
-        end_time = time()
-        steps_per_sec = args.log_every_epoch * args.batch_size / (end_time - start_time)
+                p_bar.set_postfix(seg_loss=seg_epoch_loss)
+
+        # end_time = time()
+        # steps_per_sec = args.log_every_epoch * args.batch_size / (end_time - start_time)
+        # recon_avg_loss = recon_batch_loss / (args.log_every_epoch * args.batch_size)
         seg_avg_loss = seg_batch_loss / (args.log_every_epoch * args.batch_size)
         logger.info(
-            f"(epoch batch={epoch_batch:05d}), Segmentation Loss: {seg_avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
+            f"(epoch batch={epoch_batch:05d}),Seg Loss: {seg_avg_loss:.4f}")
         # Reset monitoring variables:
-        start_time = time()
+        # start_time = time()
 
         # Save DiT checkpoint:
         if epoch_batch % args.ckpt_every_epoch == args.ckpt_every_epoch - 1:
             # if rank == 0:
+            # recon_checkpoint = {
+            #     "model": recon_model.state_dict(),
+            #     "ema": ema.state_dict(),
+            #     "opt": recon_opt.state_dict(),
+            #     "args": args
+            # }
+
             seg_checkpoint = {
                 "model": seg_model.state_dict(),
                 "opt": seg_opt.state_dict(),
             }
             checkpoint_path = checkpoint_dir
+            # torch.save(recon_checkpoint, f"{checkpoint_path}/recon.pt")
             torch.save(seg_checkpoint, f"{checkpoint_path}/seg.pt")
             logger.info(f"Saved checkpoint to {checkpoint_path}")
-            segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size, image_size=256)
+            segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size,
+                         image_size=256)
             # recon_model.train()
             seg_model.train()
 
@@ -248,11 +265,11 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=6)
-    parser.add_argument("--log-every-epoch", type=int, default=25)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=28)
-    parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
-    parser.add_argument("--DiT-model", type=str, default="results/DiT-L-4-cable/checkpoints/last.pt")
-    parser.add_argument("--pre-trained", type=str, default="")
+    parser.add_argument("--log-every-epoch", type=int, default=50)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
+    parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument("--output-folder", type=str, default="samples/mask_cable_CNN")
+    parser.add_argument("--DiT-model", type=str, default="results/DiT-L-4-cable/checkpoints/recon.pt")
+    parser.add_argument("--pre-trained", type=str, default="results/DiT-L-4-cable/checkpoints/seg.pt")
     args = parser.parse_args()
     main(args)
