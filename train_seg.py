@@ -133,7 +133,7 @@ def model_config(args, device, logger):
     seg_model = seg_model.to(device)
     seg_model.train()
 
-    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=1e-5)
+    seg_opt = torch.optim.AdamW(seg_model.parameters(), lr=5e-5)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer=seg_opt, T_max=6)
 
     diffusion = create_diffusion(timestep_respacing="",
@@ -164,11 +164,10 @@ def model_config(args, device, logger):
 def train_recon(args):
     checkpoint_dir, logger, device = basic_config(args)
     training_loader, test_loader = data_config(args, logger)
-    diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger,
-                                                                                             recon=True)
-    t = torch.ones((args.batch_size,), dtype=torch.long, device=device) * 20
+    diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger)
+    t = torch.ones((args.batch_size,), dtype=torch.long, device=device) * 5
     t = t.to(device)
-
+    ratio = 0.8
     for epoch_batch in range(args.epochs // args.log_every_epoch):
         logger.info(f"Beginning epoch batch {epoch_batch}...")
         p_bar = tqdm(range(args.log_every_epoch), desc=f"Training {epoch_batch} th epoch batch", unit="epoch")
@@ -177,26 +176,21 @@ def train_recon(args):
             # recon_epoch_loss = 0
             seg_epoch_loss = 0
             for i, (img, mask_img, mask) in enumerate(training_loader):
-                img = img.to(device)
+                # img = img.to(device)
                 mask_img = mask_img.to(device)
                 mask = mask.to(device)
                 with torch.no_grad():
                     # Map input images to latent space + normalize latents:
                     # x = vae.encode(x).latent_dist.sample().mul_(0.18215)
-                    img = vae.encode(img).latent_dist.sample().mul_(0.18215)
+                    # img = vae.encode(img).latent_dist.sample().mul_(0.18215)
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
 
-                    if i % 2 == 0:
-                        noised_img = diffusion.q_sample(x_start=mask_img, t=t)
-                        pred_xstart = diffusion.ddim_sample_loop(recon_model, mask_img, mask_img.shape,
-                                                                 noise=noised_img)
-                        label = -torch.ones(size=(pred_xstart.shape[0],), device=device)
-                    else:
-                        noised_img = diffusion.q_sample(x_start=img, t=t)
-                        pred_xstart = diffusion.ddim_sample_loop(recon_model, img, img.shape,
-                                                                 noise=noised_img)
-                        label = torch.ones(size=(pred_xstart.shape[0],), device=device)
-                pred_y, seg_loss = seg_model.train_loss(seg_loss_func, mask_img, pred_xstart, mask, vae, label)
+                    noised_img = diffusion.q_sample(x_start=mask_img, t=t)
+                    pred_xstart = diffusion.ddim_sample_loop(recon_model, noised_img, noised_img.shape,
+                                                             noise=noised_img)
+                    pred_xstart = ratio * pred_xstart + (1 - ratio) * mask_img
+
+                pred_y, seg_loss = seg_model.train_loss(seg_loss_func, mask_img, pred_xstart, mask, vae)
                 seg_opt.zero_grad()
                 seg_loss.backward()
                 seg_opt.step()
@@ -308,8 +302,8 @@ def main(args):
     """
     Trains a new DiT model.
     """
-    # train_recon(args)
-    train_aug(args)
+    train_recon(args)
+    # train_aug(args)
     # logger.info(f"Experiment directory created at {experiment_dir}")
 
     # Create model:

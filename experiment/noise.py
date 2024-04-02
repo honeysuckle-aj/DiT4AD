@@ -3,7 +3,7 @@ import random
 from sklearn.decomposition import PCA
 
 import numpy as np
-from einops import rearrange
+from einops import rearrange, repeat
 from PIL import Image, ImageDraw
 
 
@@ -73,19 +73,41 @@ def combine_patches_into_image(patch_list, original_image_size, patch_size):
 
     return reconstructed_image
 
+def make_masked_image(mask, texture, image):
+    mask = np.array(mask) // 255
+    texture = np.array(texture)
+    image = np.array(image)
+    image_base = image * (1 - mask)
+    image_t = texture * mask
+    return Image.fromarray(image_base + image_t)
 
+def add_noise(image, ratio):
+    image = np.array(image)
+    h, w, c = image.shape
+    noise = np.random.normal(scale=255, size=(h,w,c))
+    noised = image * ratio + noise * (1-ratio)
+    return Image.fromarray(noised.astype(np.uint8))
 if __name__ == '__main__':
-    # img = np.zeros((256, 256))
-    # img = Image.fromarray(img.astype(np.int64), "RGB")
-    # draw = ImageDraw.Draw(img)
-    # x = getattr(draw, 'ellipse')
-    # x(xy=[0, 0, 60, 50], fill="white")
-    #
-    # img.save("../dataset/textures/08.png", format="png")
+    img = np.zeros((256, 256))
+    img = Image.fromarray(img.astype(np.int64), "RGB")
+    draw = ImageDraw.Draw(img)
+    x = getattr(draw, 'ellipse')
+    y = getattr(draw, 'rectangle')
+    y(xy=[20, 20, 50, 50], fill="white")
+    x(xy=[110, 120, 150, 140], fill="white")
+    img.save("mask_pred.png", format="png")
+    # texture = Image.open(r"D:\Projects\DiT4AD\dataset\textures\05.png").resize((256,256))
+    # mask = Image.open("mask.png").resize((256,256))
+    # image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\001.png").resize((256,256))
+    # masked = make_masked_image(mask, texture, image)
+    # masked.save("masked_img.png", format='png')
+    # masked = Image.open("masked_img.png")
+    # noised = add_noise(masked, 0.75)
+    # noised.save("noised.png", format='png')
 
-    image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png")
-    h, w = image.size
-    patches = split_image_into_patches(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png",
-                                       128)
-    re_image = combine_patches_into_image(patches, (h, w), 128)
-    re_image.save("../dataset/textures/08.png")
+    # image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png")
+    # h, w = image.size
+    # patches = split_image_into_patches(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png",
+    #                                    128)
+    # re_image = combine_patches_into_image(patches, (h, w), 128)
+    # re_image.save("../dataset/textures/08.png")
