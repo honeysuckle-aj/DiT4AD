@@ -5,8 +5,34 @@ from sklearn.decomposition import PCA
 import numpy as np
 from einops import rearrange, repeat
 from PIL import Image, ImageDraw
+import opensimplex as simplex
+from tqdm import tqdm
 
 
+def add_simplex_noise(img, texture):
+    h, w = img.size
+    pass
+
+def generate_2D_img(im, texture, width, height, feature_size,threshold=-0.5, filename='mask_image_perlin.png'):
+    print('Generating 2D image...')
+    if im is None:
+        im = Image.new('L', (width, height))
+    if texture is None:
+        texture = Image.new('L',(width, height), 'white')
+    for y in tqdm(range(0, height)):
+        for x in range(0, width):
+            value = simplex.noise2(x / feature_size, y / feature_size)
+            if value < threshold:
+
+                im.putpixel((x, y), value=texture.getpixel((y,x)))
+    im.save(filename)
+def generate_random_noise(im, texture, width, height,threshold=0.5):
+    for y in range(0, height):
+        for x in range(0, width):
+            value = random.random()
+            if value < threshold:
+                im.putpixel((x, y), value=texture.getpixel((y,x)))
+        im.save(f'mask_image_random.png')
 def add_latent_noise(patch, mean=0, sigma=1):
     height, width, channels = patch.shape
     flattened_image = patch.reshape((height * width, channels))
@@ -88,26 +114,31 @@ def add_noise(image, ratio):
     noised = image * ratio + noise * (1-ratio)
     return Image.fromarray(noised.astype(np.uint8))
 if __name__ == '__main__':
-    img = np.zeros((256, 256))
-    img = Image.fromarray(img.astype(np.int64), "RGB")
-    draw = ImageDraw.Draw(img)
-    x = getattr(draw, 'ellipse')
-    y = getattr(draw, 'rectangle')
-    y(xy=[20, 20, 50, 50], fill="white")
-    x(xy=[110, 120, 150, 140], fill="white")
-    img.save("mask_pred.png", format="png")
-    # texture = Image.open(r"D:\Projects\DiT4AD\dataset\textures\05.png").resize((256,256))
-    # mask = Image.open("mask.png").resize((256,256))
-    # image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\001.png").resize((256,256))
+    # img = np.zeros((256, 256))
+    # img = Image.fromarray(img.astype(np.int64), "RGB")
+    # draw = ImageDraw.Draw(img)
+    # x = getattr(draw, 'ellipse')
+    # y = getattr(draw, 'rectangle')
+    # y(xy=[60, 50, 80, 80], fill="white")
+    # x(xy=[110, 120, 150, 140], fill="white")
+    # img.save("mask_pred.png", format="png")
+    texture = Image.open(r"D:\Projects\DiT4AD\dataset\textures\04.jpg").resize((256,256))
+    mask = Image.open("mask.png").resize((256,256))
+    image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\001.png").resize((256,256))
     # masked = make_masked_image(mask, texture, image)
-    # masked.save("masked_img.png", format='png')
+    # masked.save("masked_img_geo.png", format='png')
+    generate_2D_img(None, None, 1024, 1024, feature_size=32, filename="big_perlin.png")
+    # generate_2D_img(image, texture, image.size[0], image.size[1], feature_size=32, filename="big_perlin.png")
+    # generate_random_noise(image, texture, image.size[0], image.size[1], threshold=0.2)
     # masked = Image.open("masked_img.png")
-    # noised = add_noise(masked, 0.75)
-    # noised.save("noised.png", format='png')
-
-    # image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png")
+    # for i in range(5):
+    #
+    #     noised = add_noise(image, 1-i/15)
+    #     noised.save(f"noised{i}.png", format='png')
+    # generate_2D_img(256, 256, 64)
+    # image = Image.open(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\screw\test\good\007.png")
     # h, w = image.size
-    # patches = split_image_into_patches(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good\007.png",
+    # patches = split_image_into_patches(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\screw\test\good\007.png",
     #                                    128)
     # re_image = combine_patches_into_image(patches, (h, w), 128)
-    # re_image.save("../dataset/textures/08.png")
+    # re_image.save("../dataset/textures/09.png")

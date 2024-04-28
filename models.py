@@ -357,47 +357,48 @@ class SegCNN(nn.Module):
         self.trans_conv2 = nn.ConvTranspose2d(in_channels=in_channels * 4, out_channels=in_channels * 4, kernel_size=2,
                                               stride=2)
         self.conv_up21 = nn.Conv2d(in_channels=in_channels * 4, out_channels=in_channels * 2, kernel_size=3, padding=1)
-        self.conv_up22 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels, kernel_size=3, padding=1)
+        self.conv_up22 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels * 2, kernel_size=3, padding=1)
 
-        self.conv_out = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=3, padding=1)
-        self.down = nn.Sequential(self.conv_down11, nn.LeakyReLU(), self.conv_down12, nn.LeakyReLU(),
+        self.conv_out = nn.Conv2d(in_channels=in_channels * 2, out_channels=out_channels, kernel_size=3, padding=1)
+        self.down = nn.Sequential(self.conv_down11, nn.GELU(), self.conv_down12, nn.GELU(),
                                   nn.MaxPool2d(kernel_size=2),
-                                  self.conv_down21, nn.LeakyReLU(), self.conv_down22, nn.LeakyReLU(),
+                                  self.conv_down21, nn.GELU(), self.conv_down22, nn.GELU(),
                                   nn.MaxPool2d(kernel_size=2),
-                                  self.conv_mid, nn.LeakyReLU()
+                                  self.conv_mid, nn.GELU()
                                   )
         self.up = nn.Sequential(self.trans_conv1, self.conv_up11, nn.GELU(), self.conv_up12, nn.GELU(),
                                 self.trans_conv2, self.conv_up21, nn.GELU(), self.conv_up22, nn.GELU(),
-                                self.conv_out, nn.Sigmoid())
+                                self.conv_out)
+        self.out_fn = nn.Softmax(dim=1)
 
         self.init_weights()
 
     def init_weights(self):
+        # pass
         for layer in self.down.modules():
             if isinstance(layer, nn.Conv2d):
-                nn.init.kaiming_normal_(layer.weight.data, mode='fan_out', nonlinearity='leaky_relu')
+                nn.init.kaiming_normal_(layer.weight.data, mode='fan_out', nonlinearity='relu')
         # for layer in self.up.modules():
         #     if isinstance(layer, nn.Conv2d):
         #         nn.init.kaiming_normal_(layer.weight.data, mode='fan_out', nonlinearity='gelu')
 
     def forward(self, x):
+        b, c, h, w = x.shape
         x_origin = x[:, :3]
         x_recon = x[:, 3:]
         feat_origin = self.down(x_origin)
         feat_recon = self.down(x_recon)
         feat = torch.cat((feat_origin, feat_recon), dim=1)
-        out = self.up(feat).squeeze(1)
-        return torch.abs(feat_recon - feat_origin).mean(dim=(1, 2, 3)), out
+        out = self.up(feat)
+        out = self.out_fn(out.view(b, 2, -1)).view(b, 2, h, w)
+        return torch.pow(feat_recon - feat_origin, 2).mean(dim=(1, 2, 3)), out
         # return F.cosine_similarity(feat_recon, feat_origin, dim=0)
 
-    def train_loss(self, criterion, latent_x, pred_latent_x, y, vae, ratio=0.8):
-        with torch.no_grad():
-            pred_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
-            x = vae.decode(latent_x / 0.18215).sample
-            # pred_x = vae.decode(pred_latent_x / 0.18215).sample
+    def train_loss(self, criterion, x, pred_x, y):
+        # b, c = y.shape[0], y.shape[1]
         seg_input = torch.cat((x, pred_x), dim=1)
         feat_loss, pred_y = self.forward(seg_input)
-        masks = torch.sum(y, dim=(1, 2))
+        masks = torch.sum(y[:, 0], dim=(1, 2))
         label = torch.ones_like(masks)
         label[torch.where(masks > 0)] = -1
         loss = criterion(pred_y, y) + torch.mean(feat_loss * label) * 10

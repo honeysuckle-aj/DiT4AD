@@ -120,6 +120,9 @@ def get_named_beta_schedule(schedule_name, num_diffusion_timesteps):
             num_diffusion_timesteps,
             lambda t: math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2,
         )
+    elif schedule_name == "cos_weak_noise":
+        betas = [1 - math.cos((t + num_diffusion_timesteps) / (num_diffusion_timesteps * 2) * math.pi / 2) for t in range(num_diffusion_timesteps)]
+        return np.array(betas)
     else:
         raise NotImplementedError(f"unknown beta schedule: {schedule_name}")
 
@@ -232,7 +235,7 @@ class GaussianDiffusion:
                 + _extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise
         )
 
-    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w=0.3):
+    def update_conditioning_noise(self, pred_noise, t, y_t, x_t, w=0.7):
         """
         from DDAM
         epsilon = epsilon(x) - w * sqrt(1-alpha_t) * (y_t-x_t)
@@ -579,7 +582,7 @@ class GaussianDiffusion:
         # Usually our model outputs epsilon, but we re-derive it
         # in case we used x_start or x_prev prediction.
         if th.max(t) >= 2:
-            y_t = self.q_sample(x_start, t)
+            y_t = self.q_sample(x_start, t, noise=out["pred_noise"])
             updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x)
             out["pred_xstart"] = self._predict_xstart_from_eps(x, t, updated_noise)
         eps = self._predict_eps_from_xstart(x, t, out["pred_xstart"])

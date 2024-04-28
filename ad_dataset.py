@@ -4,6 +4,7 @@ import random
 import numpy as np
 import time
 
+import opensimplex as simplex
 from PIL import Image, ImageDraw
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
@@ -55,26 +56,36 @@ def cut_paste(image, mask, size):
     image.paste(crop, (x1, y1, x1 + dh, y1 + dh))
     return image, (x1, y1, x1 + dh, y1 + dh)
 
-
+def make_mask_simplex(size, mask, r):
+    feature_size = int(r * 100 - 36)
+    for y in range(0, size[0]):
+        for x in range(0, size[1]):
+            value = simplex.noise2(x / feature_size + 100 * r, y / feature_size + 100 * r)
+            color = 0 if value > -0.25 else 1
+            mask[y][x] = color
+    if feature_size % 2 == 0:
+        mask = mask.T
+    return mask
 def make_mask(texture: np.ndarray, size: tuple, ratio=0.5):
     """
     make a mask using a texture image
     texture shape: (h w c)
     """
     mask = np.zeros(size, dtype=int)
-
-    if random.random() < ratio:
+    r = random.random()
+    if r > ratio:
         mask = Image.fromarray(mask)
         draw = ImageDraw.Draw(mask)
         h, w = size
         func = random.choice(augmentation_funcs)
         func = getattr(draw, func)
-        x0 = np.random.randint(0, h - 10)
-        y0 = np.random.randint(0, w - 10)
-        x1 = np.random.randint(x0 + 10, h)
-        y1 = np.random.randint(y0 + 10, w)
+        x0 = np.random.randint(0, h - 20)
+        y0 = np.random.randint(0, w - 20)
+        x1 = np.random.randint(x0 + 5, x0 + 20)
+        y1 = np.random.randint(y0 + 5, y0 + 20)
         func(xy=[x0, y0, x1, y1], fill='white')
         mask = np.array(mask, dtype=int) // 255
+        mask = make_mask_simplex(size, mask, r)
 
     texture_mask = texture * repeat(mask, "h w -> h w c", c=3)
     return texture_mask, mask
@@ -110,7 +121,7 @@ def center_crop_arr(pil_image, image_size):
 
 
 def random_rotate(image):
-    if random.random() <= 0.25:
+    if random.random() <= 1:
         return image
     deg = random.choice([Image.ROTATE_90, Image.ROTATE_180, Image.ROTATE_270])
     return image.transpose(deg)
@@ -145,14 +156,15 @@ class MaskedDataset(Dataset):
         self.transform = transform
 
         for i in tqdm(range(len(self.image_path)), desc="loading images"):
-            image_i = random_rotate(Image.open(self.image_path[i]))  # height * width * channel + rotation
+            image_i = random_rotate(Image.open(self.image_path[i]).convert(mode="RGB"))  # height * width * channel + rotation
             # image_i = rearrange(image_i, "h w c -> c h w") 
             self.images.append(self.transform(image_i))
 
             texture_mask, mask = make_mask(textures[i % len(textures)], size=image_size)
             self.masked_images.append(
                 self.transform(add_mask(image_i, mask, texture_mask)))
-            self.masks.append(mask)
+            mask = np.expand_dims(mask, 0)
+            self.masks.append(np.concatenate((mask, 1-mask),axis=0))
         self.images = torch.tensor(np.array(self.images), dtype=torch.float)
         self.masked_images = torch.tensor(np.array(self.masked_images), dtype=torch.float)
         self.masks = torch.tensor(np.array(self.masks), dtype=torch.float)
@@ -162,6 +174,21 @@ class MaskedDataset(Dataset):
 
     def __len__(self):
         return len(self.images)
+class SegTrainDataset(Dataset):
+    def __init__(self, train_path):
+        to_t = transforms.ToTensor()
+        self.origin_path = load_image_paths(f"{train_path}/origin")
+        self.recon_path = load_image_paths(f"{train_path}/recon")
+        self.mask_path = load_image_paths(f"{train_path}/mask")
+        self.image = [transform(Image.open(img).convert(mode="RGB")) for img in self.origin_path]
+        self.recon = [transform(Image.open(img).convert(mode="RGB")) for img in self.recon_path]
+        self.mask = [to_t(Image.open(img)) for img in self.mask_path]
+
+    def __getitem__(self, idx):
+        return self.image[idx], self.recon[idx], self.mask[idx]
+
+    def __len__(self):
+        return len(self.mask)
 
 
 class TestDataset(Dataset):
@@ -171,16 +198,15 @@ class TestDataset(Dataset):
         self.x = []
         self.y = []
         self.transform = transform
+        # good -> 0, bad -> 1
         for i in tqdm(range(len(self.good_image_path)), desc="loading good images"):
-            image_i = self.transform(random_rotate(Image.open(self.good_image_path[i])))
-            # image_i = np.array(Image.open(self.good_image_path[i]).resize(image_size)) # height * width * channel
-            # image_i = rearrange(image_i, "h w c -> c h w") 
+            image_i = self.transform(random_rotate(Image.open(self.good_image_path[i]).convert(mode="RGB")))
+
             self.x.append(image_i)
             self.y.append(0)
         for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
-            image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i])))
-            # image_i = np.array(Image.open(self.bad_image_path[i]).resize(image_size)) # height * width * channel
-            # image_i = rearrange(image_i, "h w c -> c h w") 
+            image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i]).convert(mode="RGB")))
+
             self.x.append(image_i)
             self.y.append(1)
         self.x = torch.tensor(np.array(self.x), dtype=torch.float)

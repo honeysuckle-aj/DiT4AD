@@ -128,8 +128,8 @@ def main(args):
 
     requires_grad(ema, False)
     diffusion = create_diffusion(timestep_respacing="",
-                                 diffusion_steps=1000)  # default: 1000 steps, linear noise schedule. in training use ddpm config
-    recon_steps = 200
+                                 diffusion_steps=200)  # default: 1000 steps, linear noise schedule. in training use ddpm config
+    recon_steps = 100
     vae = AutoencoderKL.from_pretrained(f"stabilityai/sd-vae-ft-{args.vae}").to(device)
     logger.info(f"DiT Parameters: {sum(p.numel() for p in recon_model.parameters()):,}")
 
@@ -186,7 +186,7 @@ def main(args):
                     mask_img = vae.encode(mask_img).latent_dist.sample().mul_(0.18215)
                 if i % 3 == 0:
                     # train masked images
-                    t = torch.randint(recon_steps - t_mask, 200, (img.shape[0],),
+                    t = torch.randint(recon_steps - t_mask, recon_steps, (img.shape[0],),
                                       device=device)
                     loss_dict = diffusion.training_losses(recon_model, img, mask_img, t,
                                                           sum_steps=diffusion.num_timesteps)
@@ -218,20 +218,21 @@ def main(args):
             f"(epoch batch={epoch_batch:05d}) Reconstruct Loss: {recon_avg_loss:.4f}, Train Steps/Sec: {steps_per_sec:.2f}")
         # Reset monitoring variables:
         start_time = time()
+        recon_checkpoint = {
+            "model": recon_model.state_dict(),
+            "ema": ema.state_dict(),
+            "opt": recon_opt.state_dict(),
+            "args": args
+        }
+
+        checkpoint_path = checkpoint_dir
+        torch.save(recon_checkpoint, f"{checkpoint_path}/recon.pt")
+        logger.info(f"Saved checkpoint to {checkpoint_path}")
 
         # Save DiT checkpoint:
         if epoch_batch % args.ckpt_every_epoch == args.ckpt_every_epoch - 1:
             # if rank == 0:
-            recon_checkpoint = {
-                "model": recon_model.state_dict(),
-                "ema": ema.state_dict(),
-                "opt": recon_opt.state_dict(),
-                "args": args
-            }
 
-            checkpoint_path = checkpoint_dir
-            torch.save(recon_checkpoint, f"{checkpoint_path}/recon.pt")
-            logger.info(f"Saved checkpoint to {checkpoint_path}")
             reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
             recon_model.train()
 
@@ -259,10 +260,10 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--log-every-epoch", type=int, default=100)
+    parser.add_argument("--log-every-epoch", type=int, default=20)
     parser.add_argument("--ckpt-every-epoch", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=24)
-    parser.add_argument("--output-folder", type=str, default="samples/mask_cable")
+    parser.add_argument("--output-folder", type=str, default="samples/mask_screw")
     parser.add_argument("--pre-trained", type=str, default="")
     args = parser.parse_args()
     main(args)
