@@ -7,6 +7,7 @@
 """
 Sample new images from a pre-trained DiT.
 """
+import numpy as np
 import torch
 from einops import repeat
 from torchvision.utils import save_image
@@ -19,7 +20,7 @@ import os
 
 from tqdm import tqdm, trange
 
-from train_seg import basic_config, model_config, data_config
+from configs import basic_config, model_config, data_config
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -60,7 +61,7 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
         os.makedirs(output_folder)
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
     model.eval()  # important! This disables randomized embedding dropout
-    pbar = tqdm(enumerate(loader), desc="Eval:")
+    pbar = tqdm(enumerate(loader), desc="Reconstruct:")
     t = torch.LongTensor([20 for _ in range(batch_size)]).to(device)
     with torch.no_grad():
         for i, (x, y) in pbar:
@@ -75,21 +76,21 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
             # pred = vae.decode(pred_direct["sample"] / 0.18215).sample
             # z = vae.decode(z / 0.18215).sample
             # print(torch.sum(x_noised-x_latent))
-            image_compare = torch.concat((x, pred, torch.abs(x - pred)), dim=2)
-            save_image(image_compare, os.path.join(output_folder, f"pred_batch{i}.png"), nrow=4, normalize=True,
-                       value_range=(-1, 1))
+            # image_compare = torch.concat((x, pred, torch.abs(x - pred)), dim=2)
+            save_image(pred, f"E:/DataSets/AnomalyDetection/mvtec_anomaly_detection/cable/recon/train/good/recon/train_{i}.png", normalize=True)
 
 
 def segmentation(recon_model, seg_model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    ratio = 1
+    ratio = 0.9
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     seg_model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
     t = torch.LongTensor([20 for _ in range(batch_size)]).to(device)
     loss_list = []
     y_list = []
+    output_list = [[], [], [], []]
     with torch.no_grad():
         for i, (x, y) in pbar:
             x = x.to(device)
@@ -101,23 +102,31 @@ def segmentation(recon_model, seg_model, loader, output_folder, vae, device, bat
             pred_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
             # pred_x = vae.decode(pred_latent_x / 0.18215).sample
             seg_input = torch.cat((x, pred_x), dim=1)
-            attr_loss, pred_y = seg_model(seg_input)
+            feat_loss, pred_y = seg_model(seg_input)
             recon_loss = torch.sum(torch.abs(x - pred_x), dim=(1, 2, 3))
             # pred_y[torch.where(pred_y >= 0.5)] = 1
             # pred_y[torch.where(pred_y < 0.5)] = 0
-            mask_loss = torch.sum(pred_y[:, 0], dim=(1, 2))
-            loss_list += (mask_loss).tolist()
+            seg_loss = torch.sum(pred_y[:, 0], dim=(1, 2))
+            loss_list += (recon_loss*70 + feat_loss*2.25 + seg_loss*5500).tolist()
+            # output_list[0] += recon_loss.tolist()
+            # output_list[1] += feat_loss.tolist()
+            # output_list[2] += seg_loss.tolist()
+            # output_list[3] += y.tolist()
             # recon_loss = torch.mean((pred_x-x)**2, dim=(1,2,3))
             # loss_list += (attr_loss+mask_loss+recon_loss).tolist()
 
             y_list += y.tolist()
 
             image_compare = torch.concat((x, pred_x, repeat(pred_y[:, 0], "b h w -> b c h w", c=3)), dim=2)
-            save_image(image_compare, os.path.join(output_folder, f"pred_mask{i}.png"), nrow=8, normalize=True,
-                       value_range=(-1, 1))
+            # save_image(image_compare, os.path.join(output_folder, f"pred_mask{i}.png"), nrow=8, normalize=True,
+            #            value_range=(-1, 1))
+            save_image(image_compare, os.path.join(output_folder, f"pred_mask{i}.png"), nrow=8, normalize=True)
     result_auc = cal_auc(loss_list, y_list)
     print(result_auc)
 
+    # output_list = np.array(output_list)
+    # np.savetxt(os.path.join(output_folder, "output.txt"), output_list, fmt="%.5f")
+    # print("output")
 
 def cal_auc(pred, y):
     p = sum(y)
@@ -152,8 +161,8 @@ def main(args):
     test_loader = data_config(args, logger, training=False)
     diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger)
 
-    # reconstruct(recon_model, loader, args.output_folder, vae, device, batch_size=args.batch_size)
-    segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
+    reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
+    # segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
     # reconstruct_show_process(recon_model, test_dataset, args.output_folder, vae, device, batch_size=args.batch_size)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
@@ -161,9 +170,11 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    # parser.add_argument("--test-set", type=str,
+    #                     default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test")
     parser.add_argument("--test-set", type=str,
-                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test")
-    parser.add_argument("--batch-size", type=int, default=24)
+                        default=r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\recon\train\good\origin")
+    parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--model", type=str, choices=list(DiT_models.keys()), default="DiT-L/4")
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")
     parser.add_argument("--image-size", type=int, choices=[256, 512], default=256)

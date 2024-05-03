@@ -73,7 +73,7 @@ def basic_config(args):
     return checkpoint_dir, logger, device
 
 
-def data_config(args, logger, training=True, use_cache=False):
+def data_config(args, logger, training=True, use_cache=False, use_mask=False):
 
     test_set = TestDataset(args.test_set)
     test_loader = DataLoader(test_set, batch_size=args.batch_size, drop_last=True)

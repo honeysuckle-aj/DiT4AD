@@ -15,7 +15,7 @@ import argparse
 import os
 
 from configs import basic_config, data_config, model_config
-from models import DiT_models, SegCNN
+from models import DiT_models
 
 from reconstruct import segmentation
 
@@ -33,9 +33,9 @@ torch.backends.cudnn.allow_tf32 = True
 
 def make_data(args):
     checkpoint_dir, logger, device = basic_config(args)
-    training_loader, test_loader = data_config(args, logger)
+    training_loader, test_loader = data_config(args, logger, use_mask=True)
     diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger)
-    t = torch.ones((args.batch_size,), dtype=torch.long, device=device) * 20
+    t = torch.ones((args.batch_size,), dtype=torch.long, device=device) * 40
     t = t.to(device)
     train_folder = os.path.join(args.output_folder, "train")
     # test_folder = os.path.join(args.output_folder, "test")
@@ -142,8 +142,8 @@ def train_aug(args):
     checkpoint_dir, logger, device = basic_config(args)
     training_loader, test_loader = data_config(args, logger, use_cache=True)
     diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger)
-    segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size,
-                 image_size=256)
+    # segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device, args.batch_size,
+    #              image_size=256)
     for epoch_batch in range(args.epochs // args.log_every_epoch):
         logger.info(f"Beginning epoch batch {epoch_batch}...")
         p_bar = tqdm(range(args.log_every_epoch), desc=f"Training {epoch_batch} th epoch batch", unit="epoch")
