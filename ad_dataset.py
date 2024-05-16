@@ -22,7 +22,7 @@ transform = transforms.Compose([transforms.Resize([256, 256]),
                                 transforms.ToTensor(),
                                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
                                                      inplace=True)])
-
+to_tensor = transforms.PILToTensor()
 augmentation_funcs = ["ellipse", "rectangle"]
 
 
@@ -229,6 +229,36 @@ class TestDataset(Dataset):
 
     def __getitem__(self, index):
         return self.x[index], self.y[index]
+
+    def __len__(self):
+        return len(self.x)
+
+
+def convert_name(bad_path, mask_path):
+    bad_image_name = os.path.basename(bad_path)
+    pure_name = bad_image_name[:-4]
+    mask_name = os.path.join(mask_path, pure_name + "_mask.png")
+    return mask_name
+
+
+class SegTestDataset(Dataset):
+    def __init__(self, test_path, mask_path, image_size=(256, 256)) -> None:
+        self.x = []
+        self.mask = []
+        self.transform = transform
+
+        self.bad_image_path = load_image_paths(os.path.join(test_path, "bad"))
+
+        for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
+            image_i = self.transform(Image.open(self.bad_image_path[i]).convert(mode="RGB"))
+            mask_i = to_tensor(Image.open(convert_name(self.bad_image_path[i], mask_path)).resize((256, 256)))
+            # mask_i[torch.where(mask_i > 0)] = 1
+            self.x.append(image_i)
+            self.mask.append(mask_i)
+        self.x = torch.tensor(np.array(self.x), dtype=torch.float)
+
+    def __getitem__(self, index):
+        return self.x[index], self.mask[index]
 
     def __len__(self):
         return len(self.x)

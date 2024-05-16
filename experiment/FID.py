@@ -7,14 +7,14 @@ from pytorch_fid import fid_score
 from tqdm import tqdm
 
 
-def cal_fid(real_image, gen_image):
+def cal_fid(real_image, gen_image, device):
     # eval_model = torchvision.models.inception_v3(pretrained=True)
     # transform = transforms.Compose([
     #     transforms.Resize(256),
     #     transforms.ToTensor(),
     #     transforms.Normalize(mean=[.5, .5, .5], std=[.5, .5, .5])
     # ])
-    device = "cpu"
+    device = device
     fid = fid_score.calculate_fid_given_paths([real_image, gen_image], batch_size=16, device=device, dims=64)
     return fid
     # print(fid)
@@ -48,34 +48,34 @@ def cut_bins(origin_path, output_folder, origin_size=256, bin_radius=32, num_row
             fn = os.path.join(sub_folder, f"{j}.png")
             im.save(fn)
 
-def cal_sfid(real_folder, gen_folder):
+
+def cal_sfid(real_folder, gen_folder, device):
     real_image = sorted(os.listdir(real_folder))
     gen_image = sorted(os.listdir(gen_folder))
     assert len(real_image) == len(gen_image), "not correspond"
 
     fid_list = []
     for i in range(len(real_image)):
-
         r_im = os.path.join(real_folder, real_image[i])
         g_im = os.path.join(gen_folder, gen_image[i])
-        fid = cal_fid(r_im, g_im)
+        fid = cal_fid(r_im, g_im, device=device)
         fid_list.append(fid)
         print(i, fid)
 
     return np.mean(np.array(fid_list))
 
-if __name__ == "__main__":
 
-    # image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\recon\train\good\recon"
-    # output_folder = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\cable\DiT"
+if __name__ == "__main__":
+    # real_image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good"
+    # generated_image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\draem"
+    # fid = cal_fid(real_image_path, generated_image_path, device='cuda:0')
+    # print(fid)
+
+    # image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\draem"
+    # output_folder = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\draem"
     # cut_bins(image_path, output_folder)
 
-    real_image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test\good"
-    generated_image_path = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\recon\train\good\recon"
-    fid = cal_fid(real_image_path, generated_image_path)
-    print(fid)
-
-    # real = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\cable\real"
-    # gen = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\cable\DiT"
-    # sfid = cal_sfid(real, gen)
-    # print(sfid)
+    real = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\real"
+    gen = r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\sfid\draem"
+    sfid = cal_sfid(real, gen, device='cuda:0')
+    print(sfid)

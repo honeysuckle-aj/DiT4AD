@@ -8,7 +8,7 @@ import torch
 from diffusers import AutoencoderKL
 from torch.utils.data import DataLoader
 
-from ad_dataset import load_textures, MaskedDataset, SegTrainDataset, TestDataset, pair
+from ad_dataset import load_textures, MaskedDataset, SegTrainDataset, TestDataset, pair, SegTestDataset
 from diffusion import create_diffusion
 from download import find_model
 from models import SegCNN, DiT_models
@@ -75,9 +75,6 @@ def basic_config(args):
 
 def data_config(args, logger, training=True, use_cache=False, use_mask=False):
 
-    test_set = TestDataset(args.test_set)
-    test_loader = DataLoader(test_set, batch_size=args.batch_size, drop_last=True)
-    logger.info(f"Eval Dataset contains {len(test_set)} images")
     if training:
         textures = load_textures(args.texture_path, image_size=pair(args.image_size))
         if not use_cache:
@@ -95,10 +92,18 @@ def data_config(args, logger, training=True, use_cache=False, use_mask=False):
             drop_last=True
         )
         logger.info(f"Training Dataset contains {len(dataset)} images")
-
+        test_set = TestDataset(args.test_set)
+        test_loader = DataLoader(test_set, batch_size=args.batch_size, drop_last=True)
         return loader, test_loader
     else:
-        return test_loader
+        if use_mask:
+            seg_test_set = SegTestDataset(args.test_set, args.mask_set)
+            test_loader = DataLoader(seg_test_set, batch_size=args.batch_size, drop_last=False)
+            return test_loader
+        else:
+            test_set = TestDataset(args.test_set)
+            test_loader = DataLoader(test_set, batch_size=args.batch_size, drop_last=True)
+            return test_loader
 
 
 def model_config(args, device, logger):

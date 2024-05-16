@@ -147,22 +147,26 @@ def move_mask():
             shutil.copy(image_fn, new_image)
             idx += 1
 
-
+def resize_images(folder1, folder2, size=256):
+    for f in tqdm(os.listdir(folder1)):
+        fn = os.path.join(folder1, f)
+        im = Image.open(fn).resize((size, size))
+        im.save(os.path.join(folder2, f))
 def move_data(folder):
     for fd in tqdm(os.listdir(folder)):
         if fd not in ['bad', 'good']:
-            idx = 0
             for f in os.listdir(os.path.join(folder, fd)):
                 fn = os.path.join(folder, fd, f)
-                new_fn = os.path.join(folder, "bad", f"{fd}_{idx}.png")
+                new_fn = os.path.join(folder, "bad", f"{fd}_{f}")
                 shutil.copy(fn, new_fn)
-                idx += 1
 
 
 if __name__ == '__main__':
     # pass
-    # move_data(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\test")
-    move_mask()
+    move_data(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\ground_truth")
+    # move_mask()
+    # resize_images(r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\recon\train\good\origin2",
+    #               r"E:\DataSets\AnomalyDetection\mvtec_anomaly_detection\cable\recon\train\good\origin")
     # img = np.zeros((256, 256))
     # img = Image.fromarray(img.astype(np.int64), "RGB")
     # draw = ImageDraw.Draw(img)
