@@ -360,14 +360,14 @@ class SegCNN(nn.Module):
         self.conv_up22 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels * 2, kernel_size=3, padding=1)
 
         self.conv_out = nn.Conv2d(in_channels=in_channels * 2, out_channels=out_channels, kernel_size=3, padding=1)
-        self.down = nn.Sequential(self.conv_down11, nn.GELU(), self.conv_down12, nn.GELU(),
+        self.down = nn.Sequential(self.conv_down11, nn.ReLU(), self.conv_down12, nn.ReLU(),
                                   nn.MaxPool2d(kernel_size=2),
-                                  self.conv_down21, nn.GELU(), self.conv_down22, nn.GELU(),
+                                  self.conv_down21, nn.ReLU(), self.conv_down22, nn.ReLU(),
                                   nn.MaxPool2d(kernel_size=2),
-                                  self.conv_mid, nn.GELU()
+                                  self.conv_mid, nn.ReLU()
                                   )
-        self.up = nn.Sequential(self.trans_conv1, self.conv_up11, nn.GELU(), self.conv_up12, nn.GELU(),
-                                self.trans_conv2, self.conv_up21, nn.GELU(), self.conv_up22, nn.GELU(),
+        self.up = nn.Sequential(self.trans_conv1, self.conv_up11, nn.ReLU(), self.conv_up12, nn.ReLU(),
+                                self.trans_conv2, self.conv_up21, nn.ReLU(), self.conv_up22, nn.ReLU(),
                                 self.conv_out)
         self.out_fn = nn.Softmax(dim=1)
 

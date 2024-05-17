@@ -227,8 +227,8 @@ if __name__ == "__main__":
     parser.add_argument("--global-seed", type=int, default=0)
     parser.add_argument("--vae", type=str, choices=["ema", "mse"], default="ema")  # Choice doesn't affect training
     parser.add_argument("--num-workers", type=int, default=2)
-    parser.add_argument("--log-every-epoch", type=int, default=100)
-    parser.add_argument("--ckpt-every-epoch", type=int, default=5)
+    parser.add_argument("--log-every-epoch", type=int, default=10)
+    parser.add_argument("--ckpt-every-epoch", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--output-folder", type=str,
                         default=r"samples/cable_seg")
