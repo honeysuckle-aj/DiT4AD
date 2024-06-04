@@ -11,9 +11,14 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 import math
-from timm.models.vision_transformer import PatchEmbed, Attention, Mlp
+
+from einops import rearrange
+from timm.models.vision_transformer import PatchEmbed, Attention, Mlp, Block
+
+from ad_dataset import pair
 
 
 def modulate(x, shift, scale):
@@ -99,6 +104,7 @@ class LabelEmbedder(nn.Module):
 #################################################################################
 #                                 Core DiT Model                                #
 #################################################################################
+
 
 class DiTBlock(nn.Module):
     """
@@ -234,7 +240,7 @@ class DiT(nn.Module):
 
         x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        imgs = x.reshape((x.shape[0], c, h * p, h * p))
         return imgs
 
     def forward(self, x, t):
@@ -273,6 +279,130 @@ class DiT(nn.Module):
         half_eps = uncond_eps + cfg_scale * (cond_eps - uncond_eps)
         eps = torch.cat([half_eps, half_eps], dim=0)
         return torch.cat([eps, rest], dim=1)
+
+
+class ViT(nn.Module):
+    def __init__(self, *, input_size, patch_size, output_size, hidden_size, depth, num_heads, mlp_ratio=4,
+                 in_channels=3, out_channels=1,
+                 dropout=0.):
+        super().__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+        self.out_channels = out_channels
+        image_height, image_width = pair(input_size)  # 256 * 256
+        patch_height, patch_width = pair(patch_size)  # 16 * 16
+
+        assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
+
+        num_patches = (image_height // patch_height) * (image_width // patch_width)
+
+        self.patch_embed = PatchEmbed(input_size, patch_size, in_channels, hidden_size, bias=True)
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size))
+        self.blocks = nn.ModuleList([
+            Block(hidden_size, num_heads, mlp_ratio=mlp_ratio, attn_drop=dropout) for _ in range(depth)
+        ])
+        self.mlp = nn.Sequential(
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, output_size ** 2),
+            nn.Sigmoid()
+        )
+        self.initialize_weights()
+
+    def initialize_weights(self):
+        # Initialize transformer layers:
+        def _basic_init(module):
+            if isinstance(module, nn.Linear):
+                torch.nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.constant_(module.bias, 0)
+
+        self.apply(_basic_init)
+
+        # Initialize (and freeze) pos_embed by sin-cos embedding:
+        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches ** 0.5))
+        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+
+        # Initialize patch_embed like nn.Linear (instead of nn.Conv2d):
+        w = self.patch_embed.proj.weight.data
+        nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        nn.init.constant_(self.patch_embed.proj.bias, 0)
+
+    def forward(self, img):
+        x = self.patch_embed(img) + self.pos_embed  # img 1 9 256 256
+        b, n, _ = x.shape
+        for block in self.blocks:
+            x = block(x)
+        x = torch.mean(x, dim=1)
+        x = self.mlp(x)
+        return rearrange(x, "b (w h) -> b w h", w=self.output_size, h=self.output_size)
+
+
+class SegCNN(nn.Module):
+    def __init__(self, in_channels, out_channels, dropout=0.):
+        super().__init__()
+        self.conv_down11 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels, kernel_size=3, padding=1)
+        self.conv_down12 = nn.Conv2d(in_channels=in_channels, out_channels=in_channels * 2, kernel_size=3, padding=1)
+        self.conv_down21 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels * 2, kernel_size=3,
+                                     padding=1)
+        self.conv_down22 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels * 4, kernel_size=3,
+                                     padding=1)
+
+        self.conv_mid = nn.Conv2d(in_channels=in_channels * 4, out_channels=in_channels * 4, kernel_size=3, padding=1)
+
+        self.trans_conv1 = nn.ConvTranspose2d(in_channels=in_channels * 8, out_channels=in_channels * 8, kernel_size=2,
+                                              stride=2)
+        self.conv_up11 = nn.Conv2d(in_channels=in_channels * 8, out_channels=in_channels * 8, kernel_size=3, padding=1)
+        self.conv_up12 = nn.Conv2d(in_channels=in_channels * 8, out_channels=in_channels * 4, kernel_size=3, padding=1)
+
+        self.trans_conv2 = nn.ConvTranspose2d(in_channels=in_channels * 4, out_channels=in_channels * 4, kernel_size=2,
+                                              stride=2)
+        self.conv_up21 = nn.Conv2d(in_channels=in_channels * 4, out_channels=in_channels * 2, kernel_size=3, padding=1)
+        self.conv_up22 = nn.Conv2d(in_channels=in_channels * 2, out_channels=in_channels * 2, kernel_size=3, padding=1)
+
+        self.conv_out = nn.Conv2d(in_channels=in_channels * 2, out_channels=out_channels, kernel_size=3, padding=1)
+        self.down = nn.Sequential(self.conv_down11, nn.GELU(), self.conv_down12, nn.GELU(),
+                                  nn.MaxPool2d(kernel_size=2),
+                                  self.conv_down21, nn.GELU(), self.conv_down22, nn.GELU(),
+                                  nn.MaxPool2d(kernel_size=2),
+                                  self.conv_mid, nn.GELU()
+                                  )
+        self.up = nn.Sequential(self.trans_conv1, self.conv_up11, nn.GELU(), self.conv_up12, nn.GELU(),
+                                self.trans_conv2, self.conv_up21, nn.GELU(), self.conv_up22, nn.GELU(),
+                                self.conv_out)
+        self.out_fn = nn.Softmax(dim=1)
+
+        self.init_weights()
+
+    def init_weights(self):
+        # pass
+        for layer in self.down.modules():
+            if isinstance(layer, nn.Conv2d):
+                nn.init.kaiming_normal_(layer.weight.data, mode='fan_out', nonlinearity='relu')
+        # for layer in self.up.modules():
+        #     if isinstance(layer, nn.Conv2d):
+        #         nn.init.kaiming_normal_(layer.weight.data, mode='fan_out', nonlinearity='gelu')
+
+    def forward(self, x):
+        b, c, h, w = x.shape
+        x_origin = x[:, :3]
+        x_recon = x[:, 3:]
+        feat_origin = self.down(x_origin)
+        feat_recon = self.down(x_recon)
+        feat = torch.cat((feat_origin, feat_recon), dim=1)
+        out = self.up(feat)
+        out = self.out_fn(out.view(b, 2, -1)).view(b, 2, h, w)
+        return torch.pow(feat_recon - feat_origin, 2).mean(dim=(1, 2, 3)), out
+        # return F.cosine_similarity(feat_recon, feat_origin, dim=0)
+
+    def train_loss(self, criterion, x, pred_x, y):
+        # b, c = y.shape[0], y.shape[1]
+        seg_input = torch.cat((x, pred_x), dim=1)
+        feat_loss, pred_y = self.forward(seg_input)
+        masks = torch.sum(y[:, 0], dim=(1, 2))
+        label = torch.ones_like(masks)
+        label[torch.where(masks > 0)] = -1
+        loss = criterion(pred_y, y) + torch.mean(feat_loss * label) * 10
+        return pred_y, loss
 
 
 #################################################################################
@@ -383,7 +513,7 @@ def DiT_S_8(**kwargs):
 
 
 def DiT_Guided(**kwargs):  # DiT L/4 -> in channel = 5
-    return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16,  **kwargs)
+    return DiT(guided=True, in_channels=5, depth=24, hidden_size=1024, patch_size=4, num_heads=16, **kwargs)
 
 
 DiT_models = {
