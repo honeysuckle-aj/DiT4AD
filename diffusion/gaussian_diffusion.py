@@ -440,7 +440,7 @@ class GaussianDiffusion:
         nonzero_mask = (
             (t != 0).float().view(-1, *([1] * (len(x.shape) - 1)))
         )  # no noise when t == 0
-        if th.max(t) >= 5:
+        if th.max(t) >= -10:
             y_t = self.q_sample(x_start, t, out["pred_noise"])
             updated_noise = self.update_conditioning_noise(out["pred_noise"], t, y_t, x, w)
             out["mean"] = self.DDAM_condition_mean(x, t, updated_noise, out)

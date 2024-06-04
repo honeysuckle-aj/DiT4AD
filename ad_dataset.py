@@ -19,6 +19,7 @@ IMG_EXTENSIONS = [
 ]
 
 transform = transforms.Compose([transforms.Resize([256, 256]),
+                                # transforms.RandomRotation(180),
                                 transforms.ToTensor(),
                                 transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5],
                                                      inplace=True)])
@@ -124,7 +125,7 @@ def center_crop_arr(pil_image, image_size):
 
 
 def random_rotate(image):
-    if random.random() <= 1:
+    if random.random() <= 0.0:
         return image
     deg = random.choice([Image.ROTATE_90, Image.ROTATE_180, Image.ROTATE_270])
     return image.transpose(deg)
@@ -206,7 +207,7 @@ class TestDataset(Dataset):
         if not os.path.exists(os.path.join(test_path, "good")):
             self.image_path = load_image_paths(test_path)
             for i in tqdm(range(len(self.image_path)), desc="loading images"):
-                image_i = self.transform(random_rotate(Image.open(self.image_path[i]).convert(mode="RGB")))
+                image_i = self.transform(Image.open(self.image_path[i].convert(mode="RGB")))
                 self.x.append(image_i)
                 self.y.append(1)
         else:
@@ -215,12 +216,12 @@ class TestDataset(Dataset):
 
             # good -> 0, bad -> 1
             for i in tqdm(range(len(self.good_image_path)), desc="loading good images"):
-                image_i = self.transform(random_rotate(Image.open(self.good_image_path[i]).convert(mode="RGB")))
+                image_i = self.transform(Image.open(self.good_image_path[i]).convert(mode="RGB"))
 
                 self.x.append(image_i)
                 self.y.append(0)
             for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
-                image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i]).convert(mode="RGB")))
+                image_i = self.transform(Image.open(self.bad_image_path[i]).convert(mode="RGB"))
 
                 self.x.append(image_i)
                 self.y.append(1)
@@ -250,7 +251,7 @@ class SegTestDataset(Dataset):
         self.bad_image_path = load_image_paths(os.path.join(test_path, "bad"))
 
         for i in tqdm(range(len(self.bad_image_path)), desc="loading bad images"):
-            image_i = self.transform(Image.open(self.bad_image_path[i]).convert(mode="RGB"))
+            image_i = self.transform(random_rotate(Image.open(self.bad_image_path[i]).convert(mode="RGB")))
             mask_i = to_tensor(Image.open(convert_name(self.bad_image_path[i], mask_path)).resize((256, 256)))
             # mask_i[torch.where(mask_i > 0)] = 1
             self.x.append(image_i)

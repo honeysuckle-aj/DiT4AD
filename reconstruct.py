@@ -31,26 +31,28 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 
-def reconstruct_show_process(model, dataset, output_folder, vae, device, batch_size, image_size=256):
+def reconstruct_show_process(model, dataloader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
+
+    ds = dataloader.dataset
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     model.eval()  # important! This disables randomized embedding dropout
 
     indices = list(range(diffusion.num_timesteps))[::-1]
-    show_indices = [indices[i] for i in range(0, 100, 10)]
+    show_indices = [indices[i] for i in range(89, 190, 10)]
 
     with torch.no_grad():
-        t0 = torch.LongTensor([99]).to(device)
-        for e in range(10):
-            x, y = dataset[20 + e]
+        t0 = torch.LongTensor([199]).to(device)
+        for e in range(50, len(ds)):
+            x, y = ds[e]
             x = x.unsqueeze(0).to(device)
             out_image_progress = [x]
             x_latent = vae.encode(x).latent_dist.sample().mul_(0.18215)
             x_noised = diffusion.q_sample(x_latent, t0)
             for i in tqdm(indices):
                 t = torch.tensor([i], device=device)
-                pred_latent = diffusion.p_sample(model, x_latent, x_noised, t, w=0.)
+                pred_latent = diffusion.p_sample(model, x_latent, x_noised, t, w=0.6)
                 pred = vae.decode(pred_latent["sample"] / 0.18215).sample
                 if i in show_indices:
                     out_image_progress.append(pred)
@@ -64,7 +66,7 @@ def reconstruct_show_process(model, dataset, output_folder, vae, device, batch_s
 def reconstruct(model, loader, output_folder, vae, device, batch_size, image_size=256):
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=100)
+    diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Reconstruct:")
     t = torch.LongTensor([20 for _ in range(batch_size)]).to(device)
@@ -83,7 +85,7 @@ def reconstruct(model, loader, output_folder, vae, device, batch_size, image_siz
             # print(torch.sum(x_noised-x_latent))
             # image_compare = torch.concat((x, pred, torch.abs(x - pred)), dim=2)
             save_image(pred,
-                       f"E:/DataSets/AnomalyDetection/mvtec_anomaly_detection/cable/recon/train/good/recon/train_{i}.png",
+                       f"{output_folder}/{i}.png",
                        normalize=True)
 
 
@@ -94,7 +96,7 @@ def segmentation(recon_model, seg_model, loader, output_folder, vae, device, bat
     diffusion = create_diffusion(timestep_respacing="", diffusion_steps=200)
     seg_model.eval()  # important! This disables randomized embedding dropout
     pbar = tqdm(enumerate(loader), desc="Eval:")
-    t = torch.LongTensor([20 for _ in range(batch_size)]).to(device)
+    t = torch.LongTensor([10 for _ in range(batch_size)]).to(device)
     loss_list = []
     gt_mask_list = np.array([])
     pred_mask_list = np.array([])
@@ -104,7 +106,8 @@ def segmentation(recon_model, seg_model, loader, output_folder, vae, device, bat
             y = y.to(device)
             latent_x = vae.encode(x).latent_dist.sample().mul_(0.18215)
             noised_x = diffusion.q_sample(latent_x, t)
-            pred_latent_x = diffusion.ddim_sample_loop(recon_model, latent_x, noised_x.shape, noise=noised_x)
+            # pred_latent_x = diffusion.ddim_sample_loop(recon_model, latent_x, noised_x.shape, noise=noised_x)
+            pred_latent_x = diffusion.p_sample_loop(recon_model, latent_x, noised_x.shape, noise=noised_x, w=0.8)
 
             pred_x = vae.decode((ratio * pred_latent_x + (1 - ratio) * latent_x) / 0.18215).sample
             # pred_x = vae.decode(pred_latent_x / 0.18215).sample
@@ -125,14 +128,14 @@ def segmentation(recon_model, seg_model, loader, output_folder, vae, device, bat
             # loss_list += (attr_loss+mask_loss+recon_loss).tolist()
 
             # y_list += y.tolist()
-            # save_image(pred_x, os.path.join(output_folder, f"recon/{i}.png"), normalize=True)
-            # save_image(x, os.path.join(output_folder, f"origin/{i}.png"), normalize=True)
+            save_image(pred_x, os.path.join(output_folder, f"recon/{i}.png"), normalize=True)
+            save_image(x, os.path.join(output_folder, f"origin/{i}.png"), normalize=True)
             # yi = y[0].detach().numpy()
             # yi = rearrange(np.repeat(yi, 3, axis=0), "c h w -> h w c")
             # gt_mask = PIL.Image.fromarray(yi)
             # gt_mask.save(os.path.join(output_folder, f"gt_mask/{i}.png"))
             # save_image(repeat(y[0], "b h w -> b c h w", c=3), os.path.join(output_folder, f"gt_mask/{i}.png"))
-            # save_image(repeat(pred_y[:, 0], "b h w -> b c h w", c=3), os.path.join(output_folder, f"mask/{i}.png"), normalize=True)
+            save_image(repeat(pred_y[:, 0], "b h w -> b c h w", c=3), os.path.join(output_folder, f"mask/{i}.png"), normalize=True)
             # image_compare = torch.concat((x, pred_x, repeat(pred_y[:, 0], "b h w -> b c h w", c=3)), dim=2)
             # save_image(image_compare, os.path.join(output_folder, f"pred_mask{i}.png"), nrow=8, normalize=True,
             #            value_range=(-1, 1))
@@ -251,15 +254,15 @@ def main(args):
         os.makedirs(args.output_folder)
 
     checkpoint_dir, logger, device = basic_config(args)
-    test_loader = data_config(args, logger, training=False, use_mask=True)
+    test_loader = data_config(args, logger, training=False, use_mask=False)
     diffusion, vae, recon_model, seg_model, seg_opt, scheduler, seg_loss_func = model_config(args, device, logger)
 
     # reconstruct(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
     # segmentation_cal_ap(recon_model, seg_model, test_loader, args.output_folder, vae, device,
     #                     batch_size=args.batch_size)
-    segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device,
-                 batch_size=args.batch_size)
-    # reconstruct_show_process(recon_model, test_dataset, args.output_folder, vae, device, batch_size=args.batch_size)
+    # segmentation(recon_model, seg_model, test_loader, args.output_folder, vae, device,
+    #              batch_size=args.batch_size)
+    reconstruct_show_process(recon_model, test_loader, args.output_folder, vae, device, batch_size=args.batch_size)
     # Save and display images:
     # save_image(samples, "sample.png", nrow=4, normalize=True, value_range=(-1, 1))
 
@@ -283,7 +286,7 @@ if __name__ == "__main__":
     parser.add_argument("--recon-ckpt", type=str, default="results/DiT-L-4-cable/checkpoints/recon.pt",
                         help="Optional path to a DiT checkpoint (default: auto-download a pre-trained DiT-XL/2 model).")
     parser.add_argument("--seg-ckpt", type=str, default="results/DiT-L-4-cable/checkpoints/seg.pt")
-    parser.add_argument("--output-folder", type=str, default=r"samples/paper")
+    parser.add_argument("--output-folder", type=str, default=r"samples/show-flow-full-guide")
     parser.add_argument("--results-dir", type=str, default="results")
     args = parser.parse_args()
     main(args)
